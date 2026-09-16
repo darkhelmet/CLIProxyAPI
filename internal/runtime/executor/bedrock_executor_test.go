@@ -57,6 +57,33 @@ func TestBedrockUpstreamFormatSelection(t *testing.T) {
 	}
 }
 
+func TestSanitizeBedrockResponsesTools(t *testing.T) {
+	body := []byte(`{"model":"m","tools":[{"type":"function","name":"lookup","parameters":{"type":"object"}},{"type":"web_search","search_content_types":["news"],"filters":{}},{"type":"code_interpreter","container":{"type":"auto"}}],"tool_choice":"auto"}`)
+
+	runtime := sanitizeBedrockResponsesTools(context.Background(), body, "runtime")
+	runtimeTools := gjson.GetBytes(runtime, "tools").Array()
+	if len(runtimeTools) != 1 || runtimeTools[0].Get("type").String() != "function" {
+		t.Fatalf("runtime should keep only client tools: %s", runtime)
+	}
+
+	mantle := sanitizeBedrockResponsesTools(context.Background(), body, "mantle")
+	mantleTools := gjson.GetBytes(mantle, "tools").Array()
+	if len(mantleTools) != 3 {
+		t.Fatalf("mantle should keep server-side tools: %s", mantle)
+	}
+	if mantleTools[1].Get("search_content_types").Exists() || !mantleTools[1].Get("filters").Exists() {
+		t.Fatalf("web_search tool not sanitized on mantle: %s", mantleTools[1].Raw)
+	}
+
+	onlyServer := sanitizeBedrockResponsesTools(context.Background(), []byte(`{"tools":[{"type":"web_search"}],"tool_choice":"required"}`), "runtime")
+	if gjson.GetBytes(onlyServer, "tools").Exists() || gjson.GetBytes(onlyServer, "tool_choice").Exists() {
+		t.Fatalf("empty tools array and dangling tool_choice must be removed: %s", onlyServer)
+	}
+	if out := sanitizeBedrockResponsesTools(context.Background(), []byte(`{"model":"m"}`), "runtime"); string(out) != `{"model":"m"}` {
+		t.Fatalf("body without tools changed: %s", out)
+	}
+}
+
 func TestBedrockExecutor_ExecuteResponsesForGPTModels(t *testing.T) {
 	var gotPath string
 	var gotBody []byte

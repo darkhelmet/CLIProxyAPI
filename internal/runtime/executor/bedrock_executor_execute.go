@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/config"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/runtime/executor/helps"
@@ -72,7 +73,7 @@ func (e *BedrockExecutor) prepareRequest(ctx context.Context, target bedrockTarg
 		}
 	case bedrockProtocolResponses:
 		path = target.responsesPath
-		body = prepareBedrockResponsesBody(ctx, body)
+		body = prepareBedrockResponsesBody(ctx, body, target.endpoint)
 	}
 
 	return &bedrockPreparedRequest{
@@ -230,12 +231,61 @@ func renameBedrockMaxTokens(body []byte) []byte {
 
 // prepareBedrockResponsesBody strips Codex-only fields that Bedrock's Responses API
 // does not accept and normalizes reasoning replay content, mirroring the Meta executor.
-func prepareBedrockResponsesBody(ctx context.Context, body []byte) []byte {
+func prepareBedrockResponsesBody(ctx context.Context, body []byte, endpoint string) []byte {
 	for _, field := range []string{"generate", "prompt_cache_retention", "safety_identifier", "stream_options", "client_metadata", "prompt_cache_key"} {
 		body, _ = sjson.DeleteBytes(body, field)
 	}
+	body = sanitizeBedrockResponsesTools(ctx, body, endpoint)
 	body = normalizeCodexInstructions(body)
 	return sanitizeOpenAIResponsesReasoningEncryptedContent(ctx, "bedrock executor", body)
+}
+
+// bedrockServerSideToolPrefixes lists Responses tool types executed by the provider
+// rather than the client. bedrock-runtime does not offer server-side tools at all.
+var bedrockServerSideToolPrefixes = []string{"web_search", "code_interpreter", "image_generation", "file_search", "mcp"}
+
+// sanitizeBedrockResponsesTools adapts the Responses tools array to what Bedrock
+// accepts: server-side tools are dropped on bedrock-runtime (unsupported there), and
+// OpenAI-only web search options such as search_content_types are removed everywhere.
+func sanitizeBedrockResponsesTools(ctx context.Context, body []byte, endpoint string) []byte {
+	tools := gjson.GetBytes(body, "tools")
+	if !tools.IsArray() {
+		return body
+	}
+	runtime := config.NormalizeBedrockEndpoint(endpoint) == config.BedrockEndpointRuntime
+	kept := make([]string, 0, len(tools.Array()))
+	dropped := 0
+	for _, tool := range tools.Array() {
+		toolType := tool.Get("type").String()
+		serverSide := false
+		for _, prefix := range bedrockServerSideToolPrefixes {
+			if strings.HasPrefix(toolType, prefix) {
+				serverSide = true
+				break
+			}
+		}
+		if serverSide && runtime {
+			dropped++
+			continue
+		}
+		raw := tool.Raw
+		if strings.HasPrefix(toolType, "web_search") {
+			raw, _ = sjson.Delete(raw, "search_content_types")
+		}
+		kept = append(kept, raw)
+	}
+	if dropped > 0 {
+		helps.LogWithRequestID(ctx).Debugf("bedrock executor: dropped %d server-side tool(s) unsupported on bedrock-runtime", dropped)
+	}
+	if len(kept) == 0 {
+		body, _ = sjson.DeleteBytes(body, "tools")
+		if choice := gjson.GetBytes(body, "tool_choice"); choice.Exists() && choice.String() != "auto" {
+			body, _ = sjson.DeleteBytes(body, "tool_choice")
+		}
+		return body
+	}
+	body, _ = sjson.SetRawBytes(body, "tools", []byte("["+strings.Join(kept, ",")+"]"))
+	return body
 }
 
 // bedrockResponsesEventError converts a Responses API error or failed event into a statusErr.
