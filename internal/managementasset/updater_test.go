@@ -153,6 +153,15 @@ func TestLocalPanelFile(t *testing.T) {
 		t.Fatalf("checked-out repo resolved to %q, want %q", got, distFile)
 	}
 
+	// Vite keeps a source index.html at the repo root; the built file must still win.
+	sourceIndex := filepath.Join(repoDir, "index.html")
+	if err := os.WriteFile(sourceIndex, []byte("<script src=\"/src/main.tsx\"></script>"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := LocalPanelFile(repoDir); got != distFile {
+		t.Fatalf("repo with source index.html resolved to %q, want %q", got, distFile)
+	}
+
 	// A management.html directly in the directory wins over dist/index.html.
 	direct := filepath.Join(repoDir, ManagementFileName)
 	if err := os.WriteFile(direct, []byte("<html></html>"), 0o644); err != nil {

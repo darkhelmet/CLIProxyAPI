@@ -143,10 +143,12 @@ type releaseResponse struct {
 }
 
 // localPanelCandidates lists the relative locations probed when panel-local-path is a directory.
+// The built dist/index.html is preferred over a root index.html because a checked-out
+// Management Center repository keeps Vite's source entry (referencing /src/main.tsx) at the root.
 var localPanelCandidates = []string{
 	managementAssetName,
-	"index.html",
 	filepath.Join("dist", "index.html"),
+	"index.html",
 }
 
 // LocalPanelFile resolves remote-management.panel-local-path to an existing HTML file.
