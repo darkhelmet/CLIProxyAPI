@@ -316,6 +316,16 @@ func (s *Server) serveManagementControlPanel(c *gin.Context) {
 		c.AbortWithStatus(http.StatusNotFound)
 		return
 	}
+	if localPath := strings.TrimSpace(cfg.RemoteManagement.PanelLocalPath); localPath != "" {
+		localFile := managementasset.LocalPanelFile(localPath)
+		if localFile == "" {
+			log.Errorf("management control panel: panel-local-path %q has no management.html, index.html, or dist/index.html", localPath)
+			c.AbortWithStatus(http.StatusNotFound)
+			return
+		}
+		c.File(localFile)
+		return
+	}
 	filePath := managementasset.FilePath(s.configFilePath)
 	if strings.TrimSpace(filePath) == "" {
 		c.AbortWithStatus(http.StatusNotFound)

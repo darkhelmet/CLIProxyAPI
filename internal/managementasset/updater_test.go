@@ -3,6 +3,8 @@ package managementasset
 import (
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/config"
@@ -95,6 +97,14 @@ func TestAutoUpdateSkipReason(t *testing.T) {
 			wantSkip:   true,
 		},
 		{
+			name: "local panel path set",
+			cfg: &config.Config{
+				RemoteManagement: config.RemoteManagement{PanelLocalPath: "/tmp/panel"},
+			},
+			wantReason: "panel-local-path is set",
+			wantSkip:   true,
+		},
+		{
 			name: "auto update disabled",
 			cfg: &config.Config{
 				RemoteManagement: config.RemoteManagement{DisableAutoUpdatePanel: true},
@@ -117,5 +127,41 @@ func TestAutoUpdateSkipReason(t *testing.T) {
 				t.Fatalf("autoUpdateSkipReason() = (%q, %t), want (%q, %t)", gotReason, gotSkip, tt.wantReason, tt.wantSkip)
 			}
 		})
+	}
+}
+
+func TestLocalPanelFile(t *testing.T) {
+	if got := LocalPanelFile("  "); got != "" {
+		t.Fatalf("empty path resolved to %q", got)
+	}
+	if got := LocalPanelFile(filepath.Join(t.TempDir(), "missing")); got != "" {
+		t.Fatalf("missing path resolved to %q", got)
+	}
+
+	repoDir := t.TempDir()
+	if got := LocalPanelFile(repoDir); got != "" {
+		t.Fatalf("directory without a panel resolved to %q", got)
+	}
+	distFile := filepath.Join(repoDir, "dist", "index.html")
+	if err := os.MkdirAll(filepath.Dir(distFile), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(distFile, []byte("<html></html>"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := LocalPanelFile(repoDir); got != distFile {
+		t.Fatalf("checked-out repo resolved to %q, want %q", got, distFile)
+	}
+
+	// A management.html directly in the directory wins over dist/index.html.
+	direct := filepath.Join(repoDir, ManagementFileName)
+	if err := os.WriteFile(direct, []byte("<html></html>"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := LocalPanelFile(repoDir); got != direct {
+		t.Fatalf("directory resolved to %q, want %q", got, direct)
+	}
+	if got := LocalPanelFile(distFile); got != distFile {
+		t.Fatalf("explicit file resolved to %q", got)
 	}
 }

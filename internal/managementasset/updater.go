@@ -114,6 +114,9 @@ func autoUpdateSkipReason(cfg *config.Config) (string, bool) {
 	if cfg.RemoteManagement.DisableControlPanel {
 		return "control panel disabled", true
 	}
+	if strings.TrimSpace(cfg.RemoteManagement.PanelLocalPath) != "" {
+		return "panel-local-path is set", true
+	}
 	if cfg.RemoteManagement.DisableAutoUpdatePanel {
 		return "disable-auto-update-panel is enabled", true
 	}
@@ -137,6 +140,41 @@ type releaseAsset struct {
 
 type releaseResponse struct {
 	Assets []releaseAsset `json:"assets"`
+}
+
+// localPanelCandidates lists the relative locations probed when panel-local-path is a directory.
+var localPanelCandidates = []string{
+	managementAssetName,
+	"index.html",
+	filepath.Join("dist", "index.html"),
+}
+
+// LocalPanelFile resolves remote-management.panel-local-path to an existing HTML file.
+// It accepts the file itself, a directory holding management.html or index.html, or a
+// checked-out Management Center repository (dist/index.html). Returns "" when unset or
+// when no candidate exists.
+func LocalPanelFile(localPath string) string {
+	localPath = strings.TrimSpace(localPath)
+	if localPath == "" {
+		return ""
+	}
+	if resolved, err := util.ResolveAuthDir(localPath); err == nil && resolved != "" {
+		localPath = resolved
+	}
+	info, err := os.Stat(localPath)
+	if err != nil {
+		return ""
+	}
+	if !info.IsDir() {
+		return localPath
+	}
+	for _, candidate := range localPanelCandidates {
+		full := filepath.Join(localPath, candidate)
+		if fileInfo, errStat := os.Stat(full); errStat == nil && !fileInfo.IsDir() {
+			return full
+		}
+	}
+	return ""
 }
 
 // StaticDir resolves the directory that stores the management control panel asset.
