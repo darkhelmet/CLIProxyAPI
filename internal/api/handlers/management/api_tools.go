@@ -208,6 +208,16 @@ func (h *Handler) APICall(c *gin.Context) {
 		req.Host = hostOverride
 	}
 
+	// Bedrock credentials backed by an AWS profile have no bearer token to
+	// substitute; let the executor apply SigV4 (or the Bedrock API key) instead.
+	if auth != nil && strings.EqualFold(strings.TrimSpace(auth.Provider), "bedrock") {
+		if errPrepare := executor.NewBedrockExecutor(h.cfg).PrepareRequest(req, auth); errPrepare != nil {
+			log.WithError(errPrepare).Debug("management APICall bedrock signing failed")
+			c.JSON(http.StatusBadRequest, gin.H{"error": "bedrock request signing failed"})
+			return
+		}
+	}
+
 	httpClient := &http.Client{
 		Timeout: defaultAPICallTimeout,
 	}
