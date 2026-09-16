@@ -576,6 +576,33 @@ nonstream-keepalive-interval: 0
 #     excluded-models:
 #       - "muse-spark-1.1"
 
+# AWS Bedrock credentials
+# Uses the native Bedrock executor. Anthropic models (IDs containing "anthropic." or
+# starting with "claude") are sent to the Anthropic Messages API; every other model
+# is sent to the OpenAI Chat Completions API. Requests are signed with AWS SigV4
+# using the AWS profile (or the default credential chain) unless api-key is set.
+# bedrock-api-key:
+#   - profile: "default" # optional: AWS shared config profile; omit to use the default credential chain
+#     region: "us-east-1" # optional: resolved from the profile, then AWS_REGION/AWS_DEFAULT_REGION, then us-east-1
+#     endpoint: "runtime" # optional: "runtime" (bedrock-runtime, default) or "mantle" (bedrock-mantle)
+#     # api-key: "..." # optional: long-term Bedrock API key; when set SigV4 signing is skipped
+#     # base-url: "https://bedrock-runtime.us-east-1.amazonaws.com" # optional: override the derived endpoint URL
+#     # chat-completions-path: "/openai/v1/chat/completions" # optional: some bedrock-mantle models use /openai/v1 instead of /v1
+#     weight: 5 # optional: weighted-round-robin share; omitted defaults to 1; maximum 1,000,000
+#     prefix: "aws" # optional: require calls like "aws/claude-sonnet-5" to target this credential
+#     disable-cooling: false # optional override: true disables cooling, false enables it; omit to inherit global
+#     request-retry: 3 # optional per-auth override; 0 disables additional rounds; omit or set < 0 to inherit global
+#     proxy-url: "socks5://proxy.example.com:1080" # optional: per-credential proxy override
+#     models:
+#       - name: "global.anthropic.claude-sonnet-5" # upstream Bedrock model or inference profile ID
+#         alias: "claude-sonnet-5"                 # client alias mapped to the upstream model
+#       - name: "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
+#         alias: "claude-sonnet-4-5"
+#       - name: "openai.gpt-oss-120b-1:0"
+#         alias: "gpt-oss-120b"
+#     excluded-models:
+#       - "openai.gpt-oss-20b-1:0"
+
 # Claude API keys
 # claude-api-key:
 #   - api-key: "sk-atSM..." # use the official claude API key, no need to set the base url

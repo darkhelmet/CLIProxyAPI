@@ -54,6 +54,8 @@ func (s *ConfigSynthesizer) Synthesize(ctx *SynthesisContext) ([]*coreauth.Auth,
 	out = append(out, s.synthesizeXAIKeys(ctx)...)
 	// Meta API Keys
 	out = append(out, s.synthesizeMetaKeys(ctx)...)
+	// Bedrock credentials
+	out = append(out, s.synthesizeBedrockKeys(ctx)...)
 	// OpenAI-compat
 	out = append(out, s.synthesizeOpenAICompat(ctx)...)
 	// Vertex-compat
@@ -214,6 +216,82 @@ func (s *ConfigSynthesizer) synthesizeXAIKeys(ctx *SynthesisContext) []*coreauth
 // synthesizeMetaKeys creates Auth entries for Meta API keys.
 func (s *ConfigSynthesizer) synthesizeMetaKeys(ctx *SynthesisContext) []*coreauth.Auth {
 	return s.synthesizeCodexStyleKeys(ctx, ctx.Config.MetaKey, "meta")
+}
+
+// synthesizeBedrockKeys creates Auth entries for AWS Bedrock credentials.
+// Entries are keyed on the resolved base URL (plus profile) because SigV4
+// entries carry no API key; the auth kind is forced to "apikey" so static
+// credential routing applies uniformly.
+func (s *ConfigSynthesizer) synthesizeBedrockKeys(ctx *SynthesisContext) []*coreauth.Auth {
+	cfg := ctx.Config
+	now := ctx.Now
+	idGen := ctx.IDGenerator
+	entries := cfg.BedrockKey
+
+	out := make([]*coreauth.Auth, 0, len(entries))
+	for i := range entries {
+		entry := entries[i]
+		key := strings.TrimSpace(entry.APIKey)
+		baseURL := strings.TrimSpace(entry.BaseURL)
+		if baseURL == "" {
+			baseURL = config.BedrockBaseURL(entry.Endpoint, entry.Region)
+		}
+		prefix := strings.TrimSpace(entry.Prefix)
+		proxyURL := strings.TrimSpace(entry.ProxyURL)
+		profile := strings.TrimSpace(entry.Profile)
+		id, token := idGen.Next("bedrock:apikey", key, baseURL, proxyURL, prefix, config.FormatSortedHeaders(entry.Headers), profile)
+		attrs := map[string]string{
+			"source":                        fmt.Sprintf("config:bedrock[%s]", token),
+			"config_index":                  strconv.Itoa(i),
+			coreauth.AttributeAuthKind:      coreauth.AuthKindAPIKey,
+			"base_url":                      baseURL,
+			"bedrock_endpoint":              config.NormalizeBedrockEndpoint(entry.Endpoint),
+			"aws_region":                    config.ResolveBedrockRegion(entry.Region, profile),
+			"bedrock_chat_completions_path": config.BedrockChatCompletionsPath(entry.Endpoint, entry.ChatCompletionsPath),
+		}
+		if key != "" {
+			attrs["api_key"] = key
+		}
+		if profile != "" {
+			attrs["aws_profile"] = profile
+		}
+		metadata := map[string]any{}
+		if entry.DisableCooling != nil {
+			metadata["disable_cooling"] = *entry.DisableCooling
+		}
+		addRequestRetryToMetadata(entry.RequestRetry, metadata)
+		addRequestScopedErrorsToMetadata(entry.RequestScopedErrors, metadata)
+		if entry.Priority != 0 {
+			attrs["priority"] = strconv.Itoa(entry.Priority)
+		}
+		addWeightToAttrs(entry.Weight, attrs)
+		if hash := diff.ComputeCodexModelsHash(entry.Models); hash != "" {
+			attrs["models_hash"] = hash
+		}
+		addConfigHeadersToAttrs(entry.Headers, attrs)
+		label := "bedrock-apikey"
+		if profile != "" {
+			label = "bedrock-" + profile
+		}
+		a := &coreauth.Auth{
+			ID:         id,
+			Provider:   "bedrock",
+			Label:      label,
+			Prefix:     prefix,
+			Status:     coreauth.StatusActive,
+			ProxyURL:   proxyURL,
+			Attributes: attrs,
+			Metadata:   metadata,
+			CreatedAt:  now,
+			UpdatedAt:  now,
+		}
+		ApplyAuthExcludedModelsMeta(a, cfg, entry.ExcludedModels, "apikey")
+		if len(a.Metadata) == 0 {
+			a.Metadata = nil
+		}
+		out = append(out, a)
+	}
+	return out
 }
 
 func (s *ConfigSynthesizer) synthesizeCodexStyleKeys(ctx *SynthesisContext, entries []config.CodexKey, provider string) []*coreauth.Auth {

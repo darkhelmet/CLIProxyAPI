@@ -446,6 +446,55 @@ func BuildConfigChangeDetails(oldCfg, newCfg *config.Config) []string {
 		}
 	}
 
+	// Bedrock credentials (do not print key material)
+	if len(oldCfg.BedrockKey) != len(newCfg.BedrockKey) {
+		changes = append(changes, fmt.Sprintf("bedrock-api-key count: %d -> %d", len(oldCfg.BedrockKey), len(newCfg.BedrockKey)))
+	} else {
+		for i := range oldCfg.BedrockKey {
+			o := oldCfg.BedrockKey[i]
+			n := newCfg.BedrockKey[i]
+			if strings.TrimSpace(o.BaseURL) != strings.TrimSpace(n.BaseURL) {
+				changes = append(changes, fmt.Sprintf("bedrock[%d].base-url: %s -> %s", i, formatURL(o.BaseURL), formatURL(n.BaseURL)))
+			}
+			if strings.TrimSpace(o.Profile) != strings.TrimSpace(n.Profile) {
+				changes = append(changes, fmt.Sprintf("bedrock[%d].profile: %s -> %s", i, strings.TrimSpace(o.Profile), strings.TrimSpace(n.Profile)))
+			}
+			if strings.TrimSpace(o.Region) != strings.TrimSpace(n.Region) {
+				changes = append(changes, fmt.Sprintf("bedrock[%d].region: %s -> %s", i, strings.TrimSpace(o.Region), strings.TrimSpace(n.Region)))
+			}
+			if strings.TrimSpace(o.Endpoint) != strings.TrimSpace(n.Endpoint) {
+				changes = append(changes, fmt.Sprintf("bedrock[%d].endpoint: %s -> %s", i, strings.TrimSpace(o.Endpoint), strings.TrimSpace(n.Endpoint)))
+			}
+			if strings.TrimSpace(o.ProxyURL) != strings.TrimSpace(n.ProxyURL) {
+				changes = append(changes, fmt.Sprintf("bedrock[%d].proxy-url: %s -> %s", i, formatProxyURL(o.ProxyURL), formatProxyURL(n.ProxyURL)))
+			}
+			if strings.TrimSpace(o.Prefix) != strings.TrimSpace(n.Prefix) {
+				changes = append(changes, fmt.Sprintf("bedrock[%d].prefix: %s -> %s", i, o.Prefix, n.Prefix))
+			}
+			if o.Priority != n.Priority {
+				changes = append(changes, fmt.Sprintf("bedrock[%d].priority: %d -> %d", i, o.Priority, n.Priority))
+			}
+			changes = appendOptionalBoolChange(changes, fmt.Sprintf("bedrock[%d].disable-cooling", i), o.DisableCooling, n.DisableCooling)
+			changes = appendOptionalIntChange(changes, fmt.Sprintf("bedrock[%d].request-retry", i), o.RequestRetry, n.RequestRetry)
+			if strings.TrimSpace(o.APIKey) != strings.TrimSpace(n.APIKey) {
+				changes = append(changes, fmt.Sprintf("bedrock[%d].api-key: updated", i))
+			}
+			if !equalStringMap(o.Headers, n.Headers) {
+				changes = append(changes, fmt.Sprintf("bedrock[%d].headers: updated", i))
+			}
+			oldModels := SummarizeCodexModels(o.Models)
+			newModels := SummarizeCodexModels(n.Models)
+			if oldModels.hash != newModels.hash {
+				changes = append(changes, fmt.Sprintf("bedrock[%d].models: updated (%d -> %d entries)", i, oldModels.count, newModels.count))
+			}
+			oldExcluded := SummarizeExcludedModels(o.ExcludedModels)
+			newExcluded := SummarizeExcludedModels(n.ExcludedModels)
+			if oldExcluded.hash != newExcluded.hash {
+				changes = append(changes, fmt.Sprintf("bedrock[%d].excluded-models: updated (%d -> %d entries)", i, oldExcluded.count, newExcluded.count))
+			}
+		}
+	}
+
 	if entries, _ := DiffOAuthExcludedModelChanges(oldCfg.OAuthExcludedModels, newCfg.OAuthExcludedModels); len(entries) > 0 {
 		changes = append(changes, entries...)
 	}

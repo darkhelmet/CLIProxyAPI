@@ -679,6 +679,83 @@ type MetaKey = CodexKey
 // MetaModel uses the Codex model mapping structure for Meta Muse models.
 type MetaModel = CodexModel
 
+// BedrockEndpointRuntime selects the bedrock-runtime endpoint (recommended by AWS).
+const BedrockEndpointRuntime = "runtime"
+
+// BedrockEndpointMantle selects the bedrock-mantle endpoint.
+const BedrockEndpointMantle = "mantle"
+
+// BedrockKey represents one AWS Bedrock credential entry. Requests are signed
+// with AWS SigV4 using the configured AWS profile (or the default credential
+// chain) unless a Bedrock API key is provided, in which case bearer auth is used.
+type BedrockKey struct {
+	// APIKey is an optional long-term Amazon Bedrock API key (bearer token).
+	// When set, SigV4 signing is skipped and Profile is ignored.
+	APIKey string `yaml:"api-key,omitempty" json:"api-key,omitempty"`
+
+	// Profile is the AWS shared config profile used to resolve SigV4 credentials.
+	// Empty uses the default AWS credential chain (env vars, default profile, instance role).
+	Profile string `yaml:"profile,omitempty" json:"profile,omitempty"`
+
+	// Region is the AWS region hosting the Bedrock endpoint. When empty it is
+	// resolved from the profile, then AWS_REGION / AWS_DEFAULT_REGION, then us-east-1.
+	Region string `yaml:"region,omitempty" json:"region,omitempty"`
+
+	// Endpoint selects "runtime" (bedrock-runtime, default) or "mantle" (bedrock-mantle).
+	Endpoint string `yaml:"endpoint,omitempty" json:"endpoint,omitempty"`
+
+	// BaseURL optionally overrides the endpoint base URL (for example a VPC endpoint).
+	// When empty it is derived from Endpoint and Region.
+	BaseURL string `yaml:"base-url,omitempty" json:"base-url,omitempty"`
+
+	// ChatCompletionsPath optionally overrides the OpenAI Chat Completions path.
+	// Defaults to /openai/v1/chat/completions on runtime and /v1/chat/completions on mantle.
+	ChatCompletionsPath string `yaml:"chat-completions-path,omitempty" json:"chat-completions-path,omitempty"`
+
+	// Priority controls selection preference when multiple credentials match.
+	// Higher values are preferred; defaults to 0.
+	Priority int `yaml:"priority,omitempty" json:"priority,omitempty"`
+
+	// Weight controls proportional selection under weighted-round-robin.
+	// An omitted value defaults to 1; non-positive values exclude this credential; maximum 1,000,000.
+	Weight *int `yaml:"weight,omitempty" json:"weight,omitempty"`
+
+	// Prefix optionally namespaces models for this credential (e.g., "aws/claude-sonnet-4-5").
+	Prefix string `yaml:"prefix,omitempty" json:"prefix,omitempty"`
+
+	// ProxyURL overrides the global proxy setting for this credential if provided.
+	ProxyURL string `yaml:"proxy-url,omitempty" json:"proxy-url,omitempty"`
+
+	// Models defines upstream Bedrock model IDs and client-facing aliases.
+	Models []BedrockModel `yaml:"models" json:"models"`
+
+	// Headers optionally adds extra HTTP headers for requests sent with this credential.
+	Headers map[string]string `yaml:"headers,omitempty" json:"headers,omitempty"`
+
+	// ExcludedModels lists model IDs that should be excluded for this credential.
+	ExcludedModels []string `yaml:"excluded-models,omitempty" json:"excluded-models,omitempty"`
+
+	// DisableCooling overrides the global cooling policy for this credential when set.
+	DisableCooling *bool `yaml:"disable-cooling,omitempty" json:"disable-cooling,omitempty"`
+
+	// RequestRetry optionally overrides the global request-retry for this credential.
+	RequestRetry *int `yaml:"request-retry,omitempty" json:"request-retry,omitempty"`
+
+	// RequestScopedErrors configures custom classification rules for upstream errors.
+	RequestScopedErrors []RequestScopedErrorRule `yaml:"request-scoped-errors,omitempty" json:"request-scoped-errors,omitempty"`
+}
+
+func (k BedrockKey) GetAPIKey() string { return k.APIKey }
+
+func (k BedrockKey) GetBaseURL() string { return k.BaseURL }
+
+func (k BedrockKey) GetPrefix() string { return k.Prefix }
+
+func (k BedrockKey) GetProxyURL() string { return k.ProxyURL }
+
+// BedrockModel uses the Codex model mapping structure for Bedrock models.
+type BedrockModel = CodexModel
+
 // GeminiKey represents the configuration for a Gemini API key,
 // including optional overrides for upstream base URL, proxy routing, and headers.
 type GeminiKey struct {

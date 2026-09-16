@@ -1318,3 +1318,87 @@ func TestConfigSynthesizer_RequestScopedErrors(t *testing.T) {
 		}
 	}
 }
+
+func TestConfigSynthesizer_BedrockKeys(t *testing.T) {
+	t.Setenv("AWS_CONFIG_FILE", "/nonexistent/aws-config")
+	t.Setenv("AWS_SHARED_CREDENTIALS_FILE", "/nonexistent/aws-credentials")
+	t.Setenv("AWS_PROFILE", "")
+	t.Setenv("AWS_REGION", "")
+	t.Setenv("AWS_DEFAULT_REGION", "")
+	synth := NewConfigSynthesizer()
+	cfg := &config.Config{
+		BedrockKey: []config.BedrockKey{
+			{
+				Profile:  "dev",
+				Region:   "us-west-2",
+				ProxyURL: "http://proxy.local",
+				Models: []config.BedrockModel{
+					{Name: "global.anthropic.claude-sonnet-5", Alias: "claude-sonnet-5"},
+				},
+				Headers: map[string]string{"X-Custom": "value"},
+			},
+			{
+				APIKey:   "bedrock-key",
+				Endpoint: "mantle",
+			},
+		},
+	}
+	cfg.SanitizeBedrockKeys()
+	ctx := &SynthesisContext{Config: cfg, Now: time.Now(), IDGenerator: NewStableIDGenerator()}
+
+	auths, errSynthesize := synth.Synthesize(ctx)
+	if errSynthesize != nil {
+		t.Fatalf("Synthesize() error = %v", errSynthesize)
+	}
+	if len(auths) != 2 {
+		t.Fatalf("auth count = %d, want 2", len(auths))
+	}
+	profileAuth := auths[0]
+	if profileAuth.Provider != "bedrock" {
+		t.Fatalf("provider = %q, want bedrock", profileAuth.Provider)
+	}
+	if profileAuth.Label != "bedrock-dev" {
+		t.Fatalf("label = %q, want bedrock-dev", profileAuth.Label)
+	}
+	if profileAuth.AuthKind() != coreauth.AuthKindAPIKey {
+		t.Fatalf("auth kind = %q, want apikey even without an API key", profileAuth.AuthKind())
+	}
+	if profileAuth.AuthSourceKind() != coreauth.AuthSourceConfig {
+		t.Fatalf("auth source = %q, want config", profileAuth.AuthSourceKind())
+	}
+	if profileAuth.Attributes["aws_profile"] != "dev" || profileAuth.Attributes["aws_region"] != "us-west-2" {
+		t.Fatalf("aws attrs = %#v", profileAuth.Attributes)
+	}
+	if profileAuth.Attributes["base_url"] != "https://bedrock-runtime.us-west-2.amazonaws.com" {
+		t.Fatalf("base_url = %q", profileAuth.Attributes["base_url"])
+	}
+	if profileAuth.Attributes["bedrock_endpoint"] != "runtime" {
+		t.Fatalf("bedrock_endpoint = %q", profileAuth.Attributes["bedrock_endpoint"])
+	}
+	if profileAuth.Attributes["header:X-Custom"] != "value" {
+		t.Fatalf("custom header = %q, want value", profileAuth.Attributes["header:X-Custom"])
+	}
+	if profileAuth.Attributes["models_hash"] == "" {
+		t.Fatal("models_hash is empty")
+	}
+	if _, hasKey := profileAuth.Attributes["api_key"]; hasKey {
+		t.Fatal("profile auth unexpectedly has api_key attribute")
+	}
+	if profileAuth.ProxyURL != "http://proxy.local" {
+		t.Fatalf("proxy URL = %q", profileAuth.ProxyURL)
+	}
+
+	keyAuth := auths[1]
+	if keyAuth.Attributes["api_key"] != "bedrock-key" {
+		t.Fatalf("api_key = %q", keyAuth.Attributes["api_key"])
+	}
+	if keyAuth.Attributes["bedrock_endpoint"] != "mantle" || keyAuth.Attributes["base_url"] != "https://bedrock-mantle.us-east-1.api.aws" {
+		t.Fatalf("mantle attrs = %#v", keyAuth.Attributes)
+	}
+	if keyAuth.Attributes["bedrock_chat_completions_path"] != "/v1/chat/completions" {
+		t.Fatalf("chat path = %q", keyAuth.Attributes["bedrock_chat_completions_path"])
+	}
+	if profileAuth.ID == keyAuth.ID {
+		t.Fatal("expected distinct auth IDs")
+	}
+}

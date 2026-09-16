@@ -129,6 +129,9 @@ type Config struct {
 	// MetaKey defines Meta API key configurations using the same structure as Codex API keys.
 	MetaKey []MetaKey `yaml:"meta-api-key" json:"meta-api-key"`
 
+	// BedrockKey defines AWS Bedrock credential configurations (AWS profile or Bedrock API key).
+	BedrockKey []BedrockKey `yaml:"bedrock-api-key" json:"bedrock-api-key"`
+
 	// XAI configures provider-wide xAI request behavior.
 	XAI XAIConfig `yaml:"xai" json:"xai"`
 
