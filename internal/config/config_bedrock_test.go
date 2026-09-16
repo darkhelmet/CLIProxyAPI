@@ -84,3 +84,31 @@ func TestBedrockRegionFromEnv(t *testing.T) {
 		t.Fatalf("explicit region = %q", got)
 	}
 }
+
+func TestBedrockConfigRederivesStandardBaseURLOnEndpointChange(t *testing.T) {
+	t.Setenv("AWS_CONFIG_FILE", "/nonexistent/aws-config")
+	t.Setenv("AWS_SHARED_CREDENTIALS_FILE", "/nonexistent/aws-credentials")
+	t.Setenv("AWS_PROFILE", "")
+	t.Setenv("AWS_REGION", "")
+	t.Setenv("AWS_DEFAULT_REGION", "")
+
+	cfg := &Config{BedrockKey: []BedrockKey{
+		// Stale derived URL from a previous runtime/us-east-1 configuration.
+		{Endpoint: "mantle", Region: "eu-west-1", BaseURL: "https://bedrock-runtime.us-east-1.amazonaws.com"},
+		// Custom override must be preserved verbatim.
+		{Endpoint: "mantle", Region: "eu-west-1", BaseURL: "https://vpce-123.bedrock-runtime.eu-west-1.vpce.amazonaws.com/"},
+	}}
+	cfg.SanitizeBedrockKeys()
+	if got := cfg.BedrockKey[0].BaseURL; got != "https://bedrock-mantle.eu-west-1.api.aws" {
+		t.Fatalf("stale derived base-url not re-derived: %q", got)
+	}
+	if got := cfg.BedrockKey[1].BaseURL; got != "https://vpce-123.bedrock-runtime.eu-west-1.vpce.amazonaws.com" {
+		t.Fatalf("custom base-url was altered: %q", got)
+	}
+	if !IsDerivedBedrockBaseURL("https://bedrock-mantle.us-gov-west-1.api.aws/") {
+		t.Fatal("expected gov region mantle URL to be recognized as derived")
+	}
+	if IsDerivedBedrockBaseURL("https://bedrock-runtime.us-east-1.amazonaws.com/anthropic") {
+		t.Fatal("URL with a path must not be treated as derived")
+	}
+}

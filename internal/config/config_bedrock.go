@@ -3,6 +3,7 @@ package config
 import (
 	"context"
 	"os"
+	"regexp"
 	"strings"
 
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
@@ -34,7 +35,9 @@ func sanitizeBedrockKeyEntries(entries []BedrockKey) []BedrockKey {
 		e.Endpoint = NormalizeBedrockEndpoint(e.Endpoint)
 		e.Region = ResolveBedrockRegion(e.Region, e.Profile)
 		e.BaseURL = strings.TrimRight(strings.TrimSpace(e.BaseURL), "/")
-		if e.BaseURL == "" {
+		// A previously derived URL is not a user override: re-derive it so changing
+		// the endpoint or region takes effect instead of pinning the old host.
+		if e.BaseURL == "" || IsDerivedBedrockBaseURL(e.BaseURL) {
 			e.BaseURL = BedrockBaseURL(e.Endpoint, e.Region)
 		}
 		e.ChatCompletionsPath = strings.TrimSpace(e.ChatCompletionsPath)
@@ -66,6 +69,15 @@ func BedrockBaseURL(endpoint, region string) string {
 	}
 	return "https://bedrock-runtime." + region + ".amazonaws.com"
 }
+
+// IsDerivedBedrockBaseURL reports whether baseURL matches the standard AWS Bedrock
+// endpoint shape produced by BedrockBaseURL (for any endpoint kind or region), as
+// opposed to a custom override such as a VPC endpoint.
+func IsDerivedBedrockBaseURL(baseURL string) bool {
+	return bedrockDerivedBaseURLPattern.MatchString(strings.TrimRight(strings.TrimSpace(baseURL), "/"))
+}
+
+var bedrockDerivedBaseURLPattern = regexp.MustCompile(`^https://(bedrock-runtime\.[a-z0-9-]+\.amazonaws\.com|bedrock-mantle\.[a-z0-9-]+\.api\.aws)$`)
 
 // BedrockSigningService returns the SigV4 service name for the endpoint kind.
 func BedrockSigningService(endpoint string) string {
