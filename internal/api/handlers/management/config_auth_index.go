@@ -33,6 +33,11 @@ type metaKeyWithAuthIndex struct {
 	AuthIndex string `json:"auth-index,omitempty"`
 }
 
+type bedrockKeyWithAuthIndex struct {
+	config.BedrockKey
+	AuthIndex string `json:"auth-index,omitempty"`
+}
+
 type vertexCompatKeyWithAuthIndex struct {
 	config.VertexCompatKey
 	AuthIndex string `json:"auth-index,omitempty"`
@@ -287,6 +292,47 @@ func (h *Handler) metaKeysWithAuthIndex() []metaKeyWithAuthIndex {
 		}
 	}
 	return out
+}
+
+func (h *Handler) bedrockKeysWithAuthIndex() []bedrockKeyWithAuthIndex {
+	if h == nil {
+		return nil
+	}
+	liveIndexByID := h.liveAuthIndexByID()
+
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.cfg == nil {
+		return nil
+	}
+
+	idGen := synthesizer.NewStableIDGenerator()
+	out := make([]bedrockKeyWithAuthIndex, len(h.cfg.BedrockKey))
+	for i := range h.cfg.BedrockKey {
+		entry := h.cfg.BedrockKey[i]
+		id, _ := idGen.Next("bedrock:apikey", bedrockAuthIDComponents(entry)...)
+		out[i] = bedrockKeyWithAuthIndex{
+			BedrockKey: entry,
+			AuthIndex:  liveIndexByID[id],
+		}
+	}
+	return out
+}
+
+// bedrockAuthIDComponents mirrors the synthesizer's stable ID inputs for a Bedrock entry.
+func bedrockAuthIDComponents(entry config.BedrockKey) []string {
+	baseURL := strings.TrimSpace(entry.BaseURL)
+	if baseURL == "" {
+		baseURL = config.BedrockBaseURL(entry.Endpoint, entry.Region)
+	}
+	return []string{
+		strings.TrimSpace(entry.APIKey),
+		baseURL,
+		strings.TrimSpace(entry.ProxyURL),
+		strings.TrimSpace(entry.Prefix),
+		config.FormatSortedHeaders(entry.Headers),
+		strings.TrimSpace(entry.Profile),
+	}
 }
 
 func (h *Handler) vertexCompatKeysWithAuthIndex() []vertexCompatKeyWithAuthIndex {

@@ -151,6 +151,11 @@ func (s *Server) registerManagementRoutes() {
 		mgmt.PATCH("/meta-api-key", s.mgmt.PatchMetaKey)
 		mgmt.DELETE("/meta-api-key", s.mgmt.DeleteMetaKey)
 
+		mgmt.GET("/bedrock-api-key", s.mgmt.GetBedrockKeys)
+		mgmt.PUT("/bedrock-api-key", s.mgmt.PutBedrockKeys)
+		mgmt.PATCH("/bedrock-api-key", s.mgmt.PatchBedrockKey)
+		mgmt.DELETE("/bedrock-api-key", s.mgmt.DeleteBedrockKey)
+
 		mgmt.GET("/openai-compatibility", s.mgmt.GetOpenAICompat)
 		mgmt.PUT("/openai-compatibility", s.mgmt.PutOpenAICompat)
 		mgmt.PATCH("/openai-compatibility", s.mgmt.PatchOpenAICompat)

@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="Amazon Bedrock">
+  <rect width="64" height="64" rx="12" fill="#232F3E"/>
+  <path d="M32 12 L50 22 L50 42 L32 52 L14 42 L14 22 Z" fill="none" stroke="#FF9900" stroke-width="3" stroke-linejoin="round"/>
+  <path d="M14 22 L32 32 L50 22 M32 32 L32 52" fill="none" stroke="#FF9900" stroke-width="3" stroke-linejoin="round"/>
+</svg>

@@ -131,6 +131,14 @@ func toggleConfigAPIKeyExcludedAll(cfg *config.Config, auth *coreauth.Auth, disa
 			return true, nil
 		}
 	}
+	for i := range cfg.BedrockKey {
+		entry := &cfg.BedrockKey[i]
+		id, _ := idGen.Next("bedrock:apikey", bedrockAuthIDComponents(*entry)...)
+		if id == authID {
+			entry.ExcludedModels = setConfigAPIKeyExcludedAll(entry.ExcludedModels, disable)
+			return true, nil
+		}
+	}
 	for i := range cfg.VertexCompatAPIKey {
 		entry := &cfg.VertexCompatAPIKey[i]
 		key := strings.TrimSpace(entry.APIKey)
