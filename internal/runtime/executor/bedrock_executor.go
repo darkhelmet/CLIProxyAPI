@@ -119,7 +119,8 @@ func (e *BedrockExecutor) PrepareRequest(req *http.Request, auth *cliproxyauth.A
 	if req == nil {
 		return nil
 	}
-	return e.applyAuth(req.Context(), req, bedrockTargetFromAuth(auth), bedrockUsesMessagesAPI(req.URL.Path) || strings.Contains(req.URL.Path, "/anthropic/"))
+	messages := req.URL != nil && strings.Contains(req.URL.Path, "/anthropic/")
+	return e.applyAuth(req.Context(), req, bedrockTargetFromAuth(auth), messages)
 }
 
 // applyAuth sets bearer or SigV4 authentication headers on req.
