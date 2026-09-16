@@ -593,6 +593,8 @@ nonstream-keepalive-interval: 0
 #     # api-key: "..." # optional: long-term Bedrock API key; when set SigV4 signing is skipped
 #     # base-url: "https://bedrock-runtime.us-east-1.amazonaws.com" # optional: override the derived endpoint URL
 #     # chat-completions-path: "/openai/v1/chat/completions" # optional: some bedrock-mantle models use /openai/v1 instead of /v1
+#     # responses-path: "/openai/v1/responses" # optional: override the OpenAI Responses API path
+#     # openai-api: "auto" # optional: "auto" (Responses for GPT models, Chat Completions for gpt-oss), "responses", or "chat-completions"
 #     weight: 5 # optional: weighted-round-robin share; omitted defaults to 1; maximum 1,000,000
 #     prefix: "aws" # optional: require calls like "aws/claude-sonnet-5" to target this credential
 #     disable-cooling: false # optional override: true disables cooling, false enables it; omit to inherit global

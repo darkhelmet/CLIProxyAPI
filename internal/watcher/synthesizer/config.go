@@ -248,6 +248,8 @@ func (s *ConfigSynthesizer) synthesizeBedrockKeys(ctx *SynthesisContext) []*core
 			"bedrock_endpoint":              config.NormalizeBedrockEndpoint(entry.Endpoint),
 			"aws_region":                    config.ResolveBedrockRegion(entry.Region, profile),
 			"bedrock_chat_completions_path": config.BedrockChatCompletionsPath(entry.Endpoint, entry.ChatCompletionsPath),
+			"bedrock_responses_path":        config.BedrockResponsesPath(entry.ResponsesPath),
+			"bedrock_openai_api":            config.NormalizeBedrockOpenAIAPI(entry.OpenAIAPI),
 		}
 		if key != "" {
 			attrs["api_key"] = key

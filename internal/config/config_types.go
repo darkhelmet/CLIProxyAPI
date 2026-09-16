@@ -716,6 +716,15 @@ type BedrockKey struct {
 	// Defaults to /openai/v1/chat/completions on runtime and /v1/chat/completions on mantle.
 	ChatCompletionsPath string `yaml:"chat-completions-path,omitempty" json:"chat-completions-path,omitempty"`
 
+	// ResponsesPath optionally overrides the OpenAI Responses API path.
+	// Defaults to /openai/v1/responses on both endpoints.
+	ResponsesPath string `yaml:"responses-path,omitempty" json:"responses-path,omitempty"`
+
+	// OpenAIAPI selects which OpenAI-compatible API non-Anthropic models use:
+	// "auto" (default: Responses for GPT models, Chat Completions for gpt-oss),
+	// "responses", or "chat-completions".
+	OpenAIAPI string `yaml:"openai-api,omitempty" json:"openai-api,omitempty"`
+
 	// Priority controls selection preference when multiple credentials match.
 	// Higher values are preferred; defaults to 0.
 	Priority int `yaml:"priority,omitempty" json:"priority,omitempty"`

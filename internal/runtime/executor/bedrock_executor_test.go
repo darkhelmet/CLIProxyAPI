@@ -36,14 +36,87 @@ func TestBedrockUpstreamFormatSelection(t *testing.T) {
 		"anthropic.claude-sonnet-5":                    sdktranslator.FormatClaude,
 		"claude-sonnet-5":                              sdktranslator.FormatClaude,
 		"openai.gpt-oss-120b-1:0":                      sdktranslator.FormatOpenAI,
-		"openai.gpt-5.5":                               sdktranslator.FormatOpenAI,
-		"meta.llama3-3-70b-instruct-v1:0":              sdktranslator.FormatOpenAI,
+		"global.openai.gpt-5.6-sol":                    sdktranslator.FormatCodex,
+		"us.openai.gpt-6-astra":                        sdktranslator.FormatCodex,
+		"meta.llama3-3-70b-instruct-v1:0":              sdktranslator.FormatCodex,
 	}
 	exec := NewBedrockExecutor(&config.Config{})
 	for model, want := range cases {
 		if got := exec.RequestToFormat(cliproxyexecutor.Request{Model: model + "(high)"}, cliproxyexecutor.Options{}); got != want {
 			t.Errorf("RequestToFormat(%q) = %q, want %q", model, got, want)
 		}
+	}
+	if got := bedrockProtocolFor("us.openai.gpt-6-astra", "chat-completions"); got != bedrockProtocolChatCompletions {
+		t.Fatalf("explicit chat-completions override ignored: %v", got)
+	}
+	if got := bedrockProtocolFor("openai.gpt-oss-120b-1:0", "responses"); got != bedrockProtocolResponses {
+		t.Fatalf("explicit responses override ignored: %v", got)
+	}
+	if got := bedrockProtocolFor("anthropic.claude-sonnet-5", "responses"); got != bedrockProtocolMessages {
+		t.Fatalf("anthropic models must always use the Messages API: %v", got)
+	}
+}
+
+func TestBedrockExecutor_ExecuteResponsesForGPTModels(t *testing.T) {
+	var gotPath string
+	var gotBody []byte
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotBody, _ = io.ReadAll(r.Body)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"resp_1","object":"response","status":"completed","model":"us.openai.gpt-6-astra","output":[{"type":"message","id":"msg_1","status":"completed","role":"assistant","content":[{"type":"output_text","text":"astra says hi","annotations":[]}]}],"usage":{"input_tokens":3,"output_tokens":4,"total_tokens":7}}`))
+	}))
+	defer server.Close()
+
+	exec := NewBedrockExecutor(&config.Config{})
+	auth := newBedrockTestAuth(server.URL, map[string]string{"api_key": "k"})
+	payload := []byte(`{"model":"us.openai.gpt-6-astra","max_tokens":64,"messages":[{"role":"user","content":"hi"}],"tools":[{"type":"function","function":{"name":"lookup","parameters":{"type":"object","properties":{}}}}]}`)
+	resp, err := exec.Execute(context.Background(), auth, cliproxyexecutor.Request{Model: "us.openai.gpt-6-astra", Payload: payload}, cliproxyexecutor.Options{SourceFormat: sdktranslator.FormatOpenAI})
+	if err != nil {
+		t.Fatalf("Execute error = %v", err)
+	}
+	if gotPath != "/openai/v1/responses" {
+		t.Fatalf("path = %q, want the Responses API", gotPath)
+	}
+	if !gjson.GetBytes(gotBody, "input").Exists() || gjson.GetBytes(gotBody, "messages").Exists() {
+		t.Fatalf("body was not translated to the Responses schema: %s", gotBody)
+	}
+	if gjson.GetBytes(gotBody, "model").String() != "us.openai.gpt-6-astra" {
+		t.Fatalf("upstream model = %q", gjson.GetBytes(gotBody, "model").String())
+	}
+	if gjson.GetBytes(resp.Payload, "choices.0.message.content").String() != "astra says hi" {
+		t.Fatalf("response not translated back to chat completions: %s", resp.Payload)
+	}
+}
+
+func TestBedrockExecutor_ExecuteStreamResponsesForGPTModels(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, "event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_1\",\"object\":\"response\",\"status\":\"in_progress\",\"model\":\"us.openai.gpt-6-astra\",\"output\":[]}}\n\n")
+		_, _ = io.WriteString(w, "event: response.output_item.added\ndata: {\"type\":\"response.output_item.added\",\"output_index\":0,\"item\":{\"type\":\"message\",\"id\":\"msg_1\",\"status\":\"in_progress\",\"role\":\"assistant\",\"content\":[]}}\n\n")
+		_, _ = io.WriteString(w, "event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"item_id\":\"msg_1\",\"output_index\":0,\"content_index\":0,\"delta\":\"hi\"}\n\n")
+		_, _ = io.WriteString(w, "event: response.output_item.done\ndata: {\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":{\"type\":\"message\",\"id\":\"msg_1\",\"status\":\"completed\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"hi\",\"annotations\":[]}]}}\n\n")
+		_, _ = io.WriteString(w, "event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"object\":\"response\",\"status\":\"completed\",\"model\":\"us.openai.gpt-6-astra\",\"output\":[{\"type\":\"message\",\"id\":\"msg_1\",\"status\":\"completed\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"hi\",\"annotations\":[]}]}],\"usage\":{\"input_tokens\":2,\"output_tokens\":1,\"total_tokens\":3}}}\n\n")
+	}))
+	defer server.Close()
+
+	exec := NewBedrockExecutor(&config.Config{})
+	auth := newBedrockTestAuth(server.URL, map[string]string{"api_key": "k"})
+	payload := []byte(`{"model":"us.openai.gpt-6-astra","stream":true,"messages":[{"role":"user","content":"hi"}]}`)
+	result, err := exec.ExecuteStream(context.Background(), auth, cliproxyexecutor.Request{Model: "us.openai.gpt-6-astra", Payload: payload}, cliproxyexecutor.Options{SourceFormat: sdktranslator.FormatOpenAI, Stream: true})
+	if err != nil {
+		t.Fatalf("ExecuteStream error = %v", err)
+	}
+	var joined strings.Builder
+	for chunk := range result.Chunks {
+		if chunk.Err != nil {
+			t.Fatalf("stream chunk error: %v", chunk.Err)
+		}
+		joined.Write(chunk.Payload)
+		joined.WriteByte('\n')
+	}
+	if !strings.Contains(joined.String(), `"content":"hi"`) {
+		t.Fatalf("expected translated chat completion chunks, got: %s", joined.String())
 	}
 }
 

@@ -12,6 +12,7 @@ import (
 	cliproxyexecutor "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/executor"
 	sdktranslator "github.com/router-for-me/CLIProxyAPI/v7/sdk/translator"
 	log "github.com/sirupsen/logrus"
+	"github.com/tidwall/gjson"
 )
 
 // ExecuteStream performs a streaming request against Bedrock and translates the
@@ -85,9 +86,12 @@ func (e *BedrockExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.
 
 		scanner := bufio.NewScanner(httpResp.Body)
 		scanner.Buffer(nil, 52_428_800) // 50MB
-		if prepared.messages {
+		switch prepared.protocol {
+		case bedrockProtocolMessages:
 			e.streamMessages(ctx, scanner, prepared, req, opts, &streamUsage, emit)
-		} else {
+		case bedrockProtocolResponses:
+			e.streamResponses(ctx, scanner, prepared, req, opts, reporter, emit)
+		default:
 			e.streamChatCompletions(ctx, scanner, prepared, req, opts, &streamUsage, emit)
 		}
 		if errScan := scanner.Err(); errScan != nil {
@@ -158,6 +162,46 @@ func (e *BedrockExecutor) streamChatCompletions(ctx context.Context, scanner *bu
 		}
 		payload := bytes.TrimSpace(trimmed[len(dataTag):])
 		streamLine := append([]byte("data: "), payload...)
+		chunks := helps.TranslateStreamWithClaudeInputTokens(ctx, prepared.to, prepared.responseFormat, req.Model, opts.OriginalRequest, prepared.body, streamLine, &param, claudeInputTokens)
+		for i := range chunks {
+			if !emit(cliproxyexecutor.StreamChunk{Payload: chunks[i]}) {
+				return
+			}
+		}
+	}
+}
+
+// streamResponses forwards an OpenAI Responses API SSE stream, translating each data
+// frame and publishing usage from the terminal response.completed event.
+func (e *BedrockExecutor) streamResponses(ctx context.Context, scanner *bufio.Scanner, prepared *bedrockPreparedRequest, req cliproxyexecutor.Request, opts cliproxyexecutor.Options, reporter *helps.UsageReporter, emit func(cliproxyexecutor.StreamChunk) bool) {
+	claudeInputTokens := helps.NewClaudeInputTokenState(prepared.from, prepared.to, prepared.responseFormat, prepared.originalPayload)
+	var param any
+	outputItemsByIndex := make(map[int64][]byte)
+	var outputItemsFallback [][]byte
+	for scanner.Scan() {
+		line := scanner.Bytes()
+		helps.AppendAPIResponseChunk(ctx, e.cfg, line)
+		trimmed := bytes.TrimSpace(line)
+		if !bytes.HasPrefix(trimmed, dataTag) {
+			continue
+		}
+		eventData := bytes.TrimSpace(trimmed[len(dataTag):])
+		if errEvent := bedrockResponsesEventError(eventData); errEvent != nil {
+			helps.RecordAPIResponseError(ctx, e.cfg, errEvent)
+			reporter.PublishFailure(ctx, errEvent)
+			emit(cliproxyexecutor.StreamChunk{Err: errEvent})
+			return
+		}
+		switch gjson.GetBytes(eventData, "type").String() {
+		case "response.output_item.done":
+			xaiCollectOutputItemDone(eventData, outputItemsByIndex, &outputItemsFallback)
+		case "response.completed", "response.incomplete":
+			if detail, ok := helps.ParseCodexUsage(eventData); ok {
+				reporter.Publish(ctx, detail)
+			}
+			eventData = patchCodexCompletedOutput(eventData, outputItemsByIndex, outputItemsFallback)
+		}
+		streamLine := append([]byte("data: "), eventData...)
 		chunks := helps.TranslateStreamWithClaudeInputTokens(ctx, prepared.to, prepared.responseFormat, req.Model, opts.OriginalRequest, prepared.body, streamLine, &param, claudeInputTokens)
 		for i := range chunks {
 			if !emit(cliproxyexecutor.StreamChunk{Payload: chunks[i]}) {

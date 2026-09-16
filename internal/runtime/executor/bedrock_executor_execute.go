@@ -20,6 +20,7 @@ import (
 
 type bedrockPreparedRequest struct {
 	baseModel       string
+	protocol        bedrockProtocol
 	messages        bool
 	from            sdktranslator.Format
 	responseFormat  sdktranslator.Format
@@ -33,10 +34,11 @@ type bedrockPreparedRequest struct {
 // the selected Bedrock API and resolves the target URL.
 func (e *BedrockExecutor) prepareRequest(ctx context.Context, target bedrockTarget, req cliproxyexecutor.Request, opts cliproxyexecutor.Options, stream bool) (*bedrockPreparedRequest, error) {
 	baseModel := thinking.ParseSuffix(req.Model).ModelName
-	messages := bedrockUsesMessagesAPI(baseModel)
+	protocol := bedrockProtocolFor(baseModel, target.openAIAPI)
+	messages := protocol == bedrockProtocolMessages
 	from := opts.SourceFormat
 	responseFormat := cliproxyexecutor.ResponseFormatOrSource(opts)
-	to := bedrockUpstreamFormat(baseModel)
+	to := protocol.format()
 
 	originalPayloadSource := req.Payload
 	if len(opts.OriginalRequest) > 0 {
@@ -60,17 +62,22 @@ func (e *BedrockExecutor) prepareRequest(ctx context.Context, target bedrockTarg
 	body = helps.SetBoolIfDifferent(body, "stream", stream)
 
 	path := config.BedrockMessagesPath()
-	if !messages {
+	switch protocol {
+	case bedrockProtocolChatCompletions:
 		path = target.chatPath
 		body = renameBedrockMaxTokens(body)
 		if stream {
 			// Ask for usage in the final chunk so token accounting works.
 			body = helps.SetBoolIfDifferent(body, "stream_options.include_usage", true)
 		}
+	case bedrockProtocolResponses:
+		path = target.responsesPath
+		body = prepareBedrockResponsesBody(ctx, body)
 	}
 
 	return &bedrockPreparedRequest{
 		baseModel:       baseModel,
+		protocol:        protocol,
 		messages:        messages,
 		from:            from,
 		responseFormat:  responseFormat,
@@ -132,9 +139,23 @@ func (e *BedrockExecutor) Execute(ctx context.Context, auth *cliproxyauth.Auth, 
 		return resp, e.wrapUpstreamError(target, httpResp.StatusCode, httpResp.Header, data)
 	}
 
-	if prepared.messages {
+	switch prepared.protocol {
+	case bedrockProtocolMessages:
 		reporter.Publish(ctx, helps.ParseClaudeUsage(data))
-	} else {
+	case bedrockProtocolResponses:
+		// The codex translators consume the response.completed event shape.
+		completed, ok := metaAsCompletedEvent(data)
+		if !ok {
+			return resp, statusErr{code: http.StatusBadGateway, msg: "bedrock executor: unexpected responses payload"}
+		}
+		if errEvent := bedrockResponsesEventError(completed); errEvent != nil {
+			return resp, errEvent
+		}
+		data = completed
+		if detail, okUsage := helps.ParseCodexUsage(data); okUsage {
+			reporter.Publish(ctx, detail)
+		}
+	default:
 		reporter.Publish(ctx, helps.ParseOpenAIUsage(data))
 	}
 	reporter.EnsurePublished(ctx)
@@ -171,6 +192,15 @@ func (e *BedrockExecutor) CountTokens(ctx context.Context, auth *cliproxyauth.Au
 	if errEnc != nil {
 		return cliproxyexecutor.Response{}, fmt.Errorf("bedrock executor: tokenizer init failed: %w", errEnc)
 	}
+	if prepared.protocol == bedrockProtocolResponses {
+		count, errCount := countCodexInputTokens(enc, prepared.body)
+		if errCount != nil {
+			return cliproxyexecutor.Response{}, fmt.Errorf("bedrock executor: token counting failed: %w", errCount)
+		}
+		usageJSON := fmt.Sprintf(`{"response":{"usage":{"input_tokens":%d,"output_tokens":0,"total_tokens":%d}}}`, count, count)
+		out := sdktranslator.TranslateTokenCount(ctx, prepared.to, prepared.responseFormat, count, []byte(usageJSON))
+		return cliproxyexecutor.Response{Payload: out}, nil
+	}
 	count, errCount := helps.CountOpenAIChatTokens(enc, prepared.body)
 	if errCount != nil {
 		return cliproxyexecutor.Response{}, fmt.Errorf("bedrock executor: token counting failed: %w", errCount)
@@ -196,4 +226,27 @@ func renameBedrockMaxTokens(body []byte) []byte {
 		body = updated
 	}
 	return body
+}
+
+// prepareBedrockResponsesBody strips Codex-only fields that Bedrock's Responses API
+// does not accept and normalizes reasoning replay content, mirroring the Meta executor.
+func prepareBedrockResponsesBody(ctx context.Context, body []byte) []byte {
+	for _, field := range []string{"generate", "prompt_cache_retention", "safety_identifier", "stream_options", "client_metadata", "prompt_cache_key"} {
+		body, _ = sjson.DeleteBytes(body, field)
+	}
+	body = normalizeCodexInstructions(body)
+	return sanitizeOpenAIResponsesReasoningEncryptedContent(ctx, "bedrock executor", body)
+}
+
+// bedrockResponsesEventError converts a Responses API error or failed event into a statusErr.
+func bedrockResponsesEventError(eventData []byte) error {
+	eventType := gjson.GetBytes(eventData, "type").String()
+	if eventType != "error" && eventType != "response.failed" {
+		return nil
+	}
+	statusCode := http.StatusBadGateway
+	if code := int(gjson.GetBytes(eventData, "error.code").Int()); code >= 400 && code <= 599 {
+		statusCode = code
+	}
+	return statusErr{code: statusCode, msg: string(eventData)}
 }

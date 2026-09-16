@@ -41,6 +41,8 @@ func sanitizeBedrockKeyEntries(entries []BedrockKey) []BedrockKey {
 			e.BaseURL = BedrockBaseURL(e.Endpoint, e.Region)
 		}
 		e.ChatCompletionsPath = strings.TrimSpace(e.ChatCompletionsPath)
+		e.ResponsesPath = strings.TrimSpace(e.ResponsesPath)
+		e.OpenAIAPI = NormalizeBedrockOpenAIAPI(e.OpenAIAPI)
 		e.Headers = NormalizeHeaders(e.Headers)
 		e.ExcludedModels = NormalizeExcludedModels(e.ExcludedModels)
 		out = append(out, e)
@@ -105,6 +107,36 @@ func BedrockChatCompletionsPath(endpoint, override string) string {
 		return "/v1/chat/completions"
 	}
 	return "/openai/v1/chat/completions"
+}
+
+// Bedrock OpenAI API selection values.
+const (
+	BedrockOpenAIAPIAuto            = "auto"
+	BedrockOpenAIAPIResponses       = "responses"
+	BedrockOpenAIAPIChatCompletions = "chat-completions"
+)
+
+// NormalizeBedrockOpenAIAPI returns "auto", "responses", or "chat-completions".
+func NormalizeBedrockOpenAIAPI(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case BedrockOpenAIAPIResponses:
+		return BedrockOpenAIAPIResponses
+	case BedrockOpenAIAPIChatCompletions, "chat", "chat_completions":
+		return BedrockOpenAIAPIChatCompletions
+	default:
+		return BedrockOpenAIAPIAuto
+	}
+}
+
+// BedrockResponsesPath returns the OpenAI Responses API path, honoring an override.
+func BedrockResponsesPath(override string) string {
+	if p := strings.TrimSpace(override); p != "" {
+		if !strings.HasPrefix(p, "/") {
+			p = "/" + p
+		}
+		return p
+	}
+	return "/openai/v1/responses"
 }
 
 // ResolveBedrockRegion picks the effective region: explicit config, then the AWS shared

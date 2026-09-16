@@ -49,14 +49,25 @@ func (e *BedrockExecutor) Identifier() string {
 
 // bedrockTarget captures the resolved upstream endpoint and credential source for one auth.
 type bedrockTarget struct {
-	baseURL  string
-	endpoint string
-	region   string
-	service  string
-	chatPath string
-	apiKey   string
-	profile  string
+	baseURL       string
+	endpoint      string
+	region        string
+	service       string
+	chatPath      string
+	responsesPath string
+	openAIAPI     string
+	apiKey        string
+	profile       string
 }
+
+// bedrockProtocol identifies the upstream wire API used for a model.
+type bedrockProtocol int
+
+const (
+	bedrockProtocolMessages bedrockProtocol = iota
+	bedrockProtocolChatCompletions
+	bedrockProtocolResponses
+)
 
 func bedrockTargetFromAuth(a *cliproxyauth.Auth) bedrockTarget {
 	var attrs map[string]string
@@ -83,14 +94,52 @@ func bedrockTargetFromAuth(a *cliproxyauth.Auth) bedrockTarget {
 	if chatPath == "" {
 		chatPath = config.BedrockChatCompletionsPath(endpoint, "")
 	}
+	responsesPath := get("bedrock_responses_path")
+	if responsesPath == "" {
+		responsesPath = config.BedrockResponsesPath("")
+	}
 	return bedrockTarget{
-		baseURL:  baseURL,
-		endpoint: endpoint,
-		region:   region,
-		service:  config.BedrockSigningService(endpoint),
-		chatPath: chatPath,
-		apiKey:   get("api_key"),
-		profile:  profile,
+		baseURL:       baseURL,
+		endpoint:      endpoint,
+		region:        region,
+		service:       config.BedrockSigningService(endpoint),
+		chatPath:      chatPath,
+		responsesPath: responsesPath,
+		openAIAPI:     config.NormalizeBedrockOpenAIAPI(get("bedrock_openai_api")),
+		apiKey:        get("api_key"),
+		profile:       profile,
+	}
+}
+
+// bedrockProtocolFor picks the upstream API for a model. Anthropic models always use
+// the Messages API. Other models follow the credential's openai-api setting; in auto
+// mode GPT-5-class models use the Responses API (Bedrock rejects function tools with
+// reasoning on Chat Completions for them) while gpt-oss stays on Chat Completions,
+// which is the only OpenAI-compatible API it supports on bedrock-runtime.
+func bedrockProtocolFor(model, openAIAPI string) bedrockProtocol {
+	if bedrockUsesMessagesAPI(model) {
+		return bedrockProtocolMessages
+	}
+	switch config.NormalizeBedrockOpenAIAPI(openAIAPI) {
+	case config.BedrockOpenAIAPIResponses:
+		return bedrockProtocolResponses
+	case config.BedrockOpenAIAPIChatCompletions:
+		return bedrockProtocolChatCompletions
+	}
+	if strings.Contains(strings.ToLower(model), "gpt-oss") {
+		return bedrockProtocolChatCompletions
+	}
+	return bedrockProtocolResponses
+}
+
+func (p bedrockProtocol) format() sdktranslator.Format {
+	switch p {
+	case bedrockProtocolMessages:
+		return sdktranslator.FormatClaude
+	case bedrockProtocolResponses:
+		return sdktranslator.FormatCodex
+	default:
+		return sdktranslator.FormatOpenAI
 	}
 }
 
@@ -101,16 +150,10 @@ func bedrockUsesMessagesAPI(model string) bool {
 	return strings.Contains(m, "anthropic.") || strings.HasPrefix(m, "claude")
 }
 
-func bedrockUpstreamFormat(model string) sdktranslator.Format {
-	if bedrockUsesMessagesAPI(model) {
-		return sdktranslator.FormatClaude
-	}
-	return sdktranslator.FormatOpenAI
-}
-
 // RequestToFormat tells the conductor which wire format this request will use upstream.
+// The credential is not available here, so the auto policy is assumed.
 func (e *BedrockExecutor) RequestToFormat(req cliproxyexecutor.Request, _ cliproxyexecutor.Options) sdktranslator.Format {
-	return bedrockUpstreamFormat(thinking.ParseSuffix(req.Model).ModelName)
+	return bedrockProtocolFor(thinking.ParseSuffix(req.Model).ModelName, config.BedrockOpenAIAPIAuto).format()
 }
 
 // PrepareRequest applies Bedrock authentication to an outgoing HTTP request.
