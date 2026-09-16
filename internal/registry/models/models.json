@@ -4177,5 +4177,165 @@
         "text"
       ]
     }
+  ],
+  "bedrock": [
+    {
+      "id": "global.anthropic.claude-sonnet-5",
+      "object": "model",
+      "created": 1782777600,
+      "owned_by": "anthropic",
+      "type": "bedrock",
+      "display_name": "Claude Sonnet 5 (Bedrock)",
+      "name": "global.anthropic.claude-sonnet-5",
+      "description": "Anthropic Claude Sonnet 5 via Amazon Bedrock inference profile",
+      "context_length": 1000000,
+      "max_completion_tokens": 128000,
+      "thinking": {
+        "zero_allowed": true,
+        "dynamic_allowed": true,
+        "levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ]
+      },
+      "supportedInputModalities": [
+        "text",
+        "image"
+      ],
+      "supportedOutputModalities": [
+        "text"
+      ]
+    },
+    {
+      "id": "us.anthropic.claude-sonnet-5",
+      "object": "model",
+      "created": 1782777600,
+      "owned_by": "anthropic",
+      "type": "bedrock",
+      "display_name": "Claude Sonnet 5 (Bedrock)",
+      "name": "us.anthropic.claude-sonnet-5",
+      "description": "Anthropic Claude Sonnet 5 via Amazon Bedrock inference profile",
+      "context_length": 1000000,
+      "max_completion_tokens": 128000,
+      "thinking": {
+        "zero_allowed": true,
+        "dynamic_allowed": true,
+        "levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ]
+      },
+      "supportedInputModalities": [
+        "text",
+        "image"
+      ],
+      "supportedOutputModalities": [
+        "text"
+      ]
+    },
+    {
+      "id": "global.anthropic.claude-sonnet-4-5-20250929-v1:0",
+      "object": "model",
+      "created": 1759104000,
+      "owned_by": "anthropic",
+      "type": "bedrock",
+      "display_name": "Claude 4.5 Sonnet (Bedrock)",
+      "name": "global.anthropic.claude-sonnet-4-5-20250929-v1:0",
+      "description": "Anthropic Claude 4.5 Sonnet via Amazon Bedrock inference profile",
+      "context_length": 200000,
+      "max_completion_tokens": 64000,
+      "thinking": {
+        "min": 1024,
+        "max": 128000,
+        "zero_allowed": true
+      },
+      "supportedInputModalities": [
+        "text",
+        "image"
+      ],
+      "supportedOutputModalities": [
+        "text"
+      ]
+    },
+    {
+      "id": "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
+      "object": "model",
+      "created": 1759104000,
+      "owned_by": "anthropic",
+      "type": "bedrock",
+      "display_name": "Claude 4.5 Sonnet (Bedrock)",
+      "name": "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
+      "description": "Anthropic Claude 4.5 Sonnet via Amazon Bedrock inference profile",
+      "context_length": 200000,
+      "max_completion_tokens": 64000,
+      "thinking": {
+        "min": 1024,
+        "max": 128000,
+        "zero_allowed": true
+      },
+      "supportedInputModalities": [
+        "text",
+        "image"
+      ],
+      "supportedOutputModalities": [
+        "text"
+      ]
+    },
+    {
+      "id": "openai.gpt-oss-120b-1:0",
+      "object": "model",
+      "created": 1754352000,
+      "owned_by": "openai",
+      "type": "bedrock",
+      "display_name": "gpt-oss-120b (Bedrock)",
+      "name": "openai.gpt-oss-120b-1:0",
+      "description": "OpenAI gpt-oss-120b open-weight model via Amazon Bedrock",
+      "context_length": 131072,
+      "max_completion_tokens": 16384,
+      "thinking": {
+        "levels": [
+          "low",
+          "medium",
+          "high"
+        ]
+      },
+      "supportedInputModalities": [
+        "text"
+      ],
+      "supportedOutputModalities": [
+        "text"
+      ]
+    },
+    {
+      "id": "openai.gpt-oss-20b-1:0",
+      "object": "model",
+      "created": 1754352000,
+      "owned_by": "openai",
+      "type": "bedrock",
+      "display_name": "gpt-oss-20b (Bedrock)",
+      "name": "openai.gpt-oss-20b-1:0",
+      "description": "OpenAI gpt-oss-20b open-weight model via Amazon Bedrock",
+      "context_length": 131072,
+      "max_completion_tokens": 16384,
+      "thinking": {
+        "levels": [
+          "low",
+          "medium",
+          "high"
+        ]
+      },
+      "supportedInputModalities": [
+        "text"
+      ],
+      "supportedOutputModalities": [
+        "text"
+      ]
+    }
   ]
 }

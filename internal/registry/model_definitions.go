@@ -35,6 +35,7 @@ type staticModelsJSON struct {
 	XAI         []*ModelInfo `json:"xai"`
 	Devin       []*ModelInfo `json:"devin"`
 	Meta        []*ModelInfo `json:"meta"`
+	Bedrock     []*ModelInfo `json:"bedrock"`
 }
 
 // GetClaudeModels returns the standard Claude model definitions.
@@ -504,6 +505,8 @@ func GetStaticModelDefinitionsByChannel(channel string) []*ModelInfo {
 		return GetDevinModels()
 	case "meta", "muse":
 		return GetMetaModels()
+	case "bedrock", "aws":
+		return GetBedrockModels()
 	default:
 		return nil
 	}
@@ -519,6 +522,70 @@ func LookupStaticModelInfoByChannel(modelID, channel string) *ModelInfo {
 	for _, model := range GetStaticModelDefinitionsByChannel(channel) {
 		if model != nil && model.ID == modelID {
 			return cloneModelInfo(model)
+		}
+	}
+	if strings.EqualFold(strings.TrimSpace(channel), "bedrock") {
+		return lookupBedrockVendorModelInfo(modelID)
+	}
+	return nil
+}
+
+// GetBedrockModels returns the static AWS Bedrock model definitions.
+func GetBedrockModels() []*ModelInfo {
+	return cloneModelInfos(getModels().Bedrock)
+}
+
+// NormalizeBedrockModelID maps a Bedrock Anthropic model or inference-profile ID onto
+// the native Anthropic model ID so static capabilities (thinking ranges, context
+// length) can be reused. Non-Anthropic IDs are returned unchanged.
+//
+// Examples:
+//
+//	us.anthropic.claude-sonnet-4-5-20250929-v1:0 -> claude-sonnet-4-5-20250929
+//	global.anthropic.claude-sonnet-5             -> claude-sonnet-5
+func NormalizeBedrockModelID(modelID string) string {
+	trimmed := strings.TrimSpace(modelID)
+	const marker = "anthropic."
+	idx := strings.Index(trimmed, marker)
+	if idx < 0 {
+		return trimmed
+	}
+	native := trimmed[idx+len(marker):]
+	if colon := strings.LastIndex(native, ":"); colon > 0 {
+		native = native[:colon]
+	}
+	if dash := strings.LastIndex(native, "-v"); dash > 0 && isDigits(native[dash+2:]) {
+		native = native[:dash]
+	}
+	return native
+}
+
+func isDigits(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+// lookupBedrockVendorModelInfo resolves a Bedrock Anthropic ID against the Claude
+// static section, returning a clone whose ID is the Bedrock ID.
+func lookupBedrockVendorModelInfo(modelID string) *ModelInfo {
+	native := NormalizeBedrockModelID(modelID)
+	if native == "" || native == strings.TrimSpace(modelID) {
+		return nil
+	}
+	for _, model := range getModels().Claude {
+		if model != nil && model.ID == native {
+			cloned := cloneModelInfo(model)
+			cloned.ID = strings.TrimSpace(modelID)
+			cloned.Name = strings.TrimSpace(modelID)
+			cloned.Type = "bedrock"
+			return cloned
 		}
 	}
 	return nil
@@ -549,6 +616,7 @@ func LookupStaticModelInfo(modelID string) *ModelInfo {
 		data.Devin,
 		staticDevinModels,
 		data.Meta,
+		data.Bedrock,
 	}
 	for _, models := range allModels {
 		for _, m := range models {
@@ -556,6 +624,9 @@ func LookupStaticModelInfo(modelID string) *ModelInfo {
 				return cloneModelInfo(m)
 			}
 		}
+	}
+	if bedrockInfo := lookupBedrockVendorModelInfo(modelID); bedrockInfo != nil {
+		return bedrockInfo
 	}
 
 	return nil

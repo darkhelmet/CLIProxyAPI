@@ -125,6 +125,9 @@ func tryRefreshModels(ctx context.Context, label string) {
 	if len(parsed.Meta) == 0 && oldData != nil && len(oldData.Meta) > 0 {
 		parsed.Meta = oldData.Meta
 	}
+	if len(parsed.Bedrock) == 0 && oldData != nil && len(oldData.Bedrock) > 0 {
+		parsed.Bedrock = oldData.Bedrock
+	}
 
 	// Detect changes before updating store.
 	changed := detectChangedProviders(oldData, parsed)
@@ -223,6 +226,7 @@ func detectChangedProviders(oldData, newData *staticModelsJSON) []string {
 		{"xai", oldData.XAI, newData.XAI},
 		{"devin", oldData.Devin, newData.Devin},
 		{"meta", oldData.Meta, newData.Meta},
+		{"bedrock", oldData.Bedrock, newData.Bedrock},
 	}
 
 	seen := make(map[string]bool, len(sections))
