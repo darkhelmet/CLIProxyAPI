@@ -138,14 +138,30 @@ func TestBedrockExecutor_ExecuteMessagesWithAPIKey(t *testing.T) {
 	}
 }
 
+func TestRenameBedrockMaxTokens(t *testing.T) {
+	out := renameBedrockMaxTokens([]byte(`{"model":"m","max_tokens":64,"messages":[]}`))
+	if gjson.GetBytes(out, "max_tokens").Exists() || gjson.GetBytes(out, "max_completion_tokens").Int() != 64 {
+		t.Fatalf("max_tokens not renamed: %s", out)
+	}
+	out = renameBedrockMaxTokens([]byte(`{"max_tokens":64,"max_completion_tokens":32}`))
+	if gjson.GetBytes(out, "max_tokens").Exists() || gjson.GetBytes(out, "max_completion_tokens").Int() != 32 {
+		t.Fatalf("explicit max_completion_tokens must win: %s", out)
+	}
+	if out = renameBedrockMaxTokens([]byte(`{"model":"m"}`)); string(out) != `{"model":"m"}` {
+		t.Fatalf("body without max_tokens changed: %s", out)
+	}
+}
+
 func TestBedrockExecutor_ExecuteChatCompletionsWithSigV4(t *testing.T) {
 	var gotPath, gotAuthz, gotDate, gotToken, gotAPIKey string
+	var gotBody []byte
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotPath = r.URL.Path
 		gotAuthz = r.Header.Get("Authorization")
 		gotDate = r.Header.Get("X-Amz-Date")
 		gotToken = r.Header.Get("X-Amz-Security-Token")
 		gotAPIKey = r.Header.Get("x-api-key")
+		gotBody, _ = io.ReadAll(r.Body)
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"id":"chatcmpl-1","object":"chat.completion","model":"openai.gpt-oss-120b","choices":[{"index":0,"message":{"role":"assistant","content":"oss says hi"},"finish_reason":"stop"}],"usage":{"prompt_tokens":3,"completion_tokens":3,"total_tokens":6}}`))
 	}))
@@ -160,13 +176,16 @@ func TestBedrockExecutor_ExecuteChatCompletionsWithSigV4(t *testing.T) {
 		"aws_profile":                   "dev",
 		"bedrock_chat_completions_path": "/v1/chat/completions",
 	})
-	payload := []byte(`{"model":"openai.gpt-oss-120b","messages":[{"role":"user","content":"hi"}]}`)
+	payload := []byte(`{"model":"openai.gpt-oss-120b","max_tokens":64,"messages":[{"role":"user","content":"hi"}]}`)
 	resp, err := exec.Execute(context.Background(), auth, cliproxyexecutor.Request{Model: "openai.gpt-oss-120b", Payload: payload}, cliproxyexecutor.Options{SourceFormat: sdktranslator.FormatOpenAI})
 	if err != nil {
 		t.Fatalf("Execute error = %v", err)
 	}
 	if gotPath != "/v1/chat/completions" {
 		t.Fatalf("path = %q", gotPath)
+	}
+	if gjson.GetBytes(gotBody, "max_tokens").Exists() || gjson.GetBytes(gotBody, "max_completion_tokens").Int() != 64 {
+		t.Fatalf("chat completions body must use max_completion_tokens: %s", gotBody)
 	}
 	if !strings.HasPrefix(gotAuthz, "AWS4-HMAC-SHA256 Credential=AKIATEST/") || !strings.Contains(gotAuthz, "/us-west-2/bedrock-mantle/aws4_request") {
 		t.Fatalf("authorization = %q", gotAuthz)

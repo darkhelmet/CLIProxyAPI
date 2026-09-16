@@ -14,6 +14,8 @@ import (
 	cliproxyexecutor "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/executor"
 	sdktranslator "github.com/router-for-me/CLIProxyAPI/v7/sdk/translator"
 	log "github.com/sirupsen/logrus"
+	"github.com/tidwall/gjson"
+	"github.com/tidwall/sjson"
 )
 
 type bedrockPreparedRequest struct {
@@ -60,6 +62,7 @@ func (e *BedrockExecutor) prepareRequest(ctx context.Context, target bedrockTarg
 	path := config.BedrockMessagesPath()
 	if !messages {
 		path = target.chatPath
+		body = renameBedrockMaxTokens(body)
 		if stream {
 			// Ask for usage in the final chunk so token accounting works.
 			body = helps.SetBoolIfDifferent(body, "stream_options.include_usage", true)
@@ -174,4 +177,23 @@ func (e *BedrockExecutor) CountTokens(ctx context.Context, auth *cliproxyauth.Au
 	}
 	out := sdktranslator.TranslateTokenCount(ctx, prepared.to, prepared.responseFormat, count, helps.BuildOpenAIUsageJSON(count))
 	return cliproxyexecutor.Response{Payload: out}, nil
+}
+
+// renameBedrockMaxTokens rewrites the legacy max_tokens field to
+// max_completion_tokens. Bedrock's OpenAI-compatible Chat Completions rejects
+// max_tokens for GPT-5-class models ("Unsupported parameter: 'max_tokens'").
+func renameBedrockMaxTokens(body []byte) []byte {
+	maxTokens := gjson.GetBytes(body, "max_tokens")
+	if !maxTokens.Exists() {
+		return body
+	}
+	if !gjson.GetBytes(body, "max_completion_tokens").Exists() {
+		if updated, err := sjson.SetRawBytes(body, "max_completion_tokens", []byte(maxTokens.Raw)); err == nil {
+			body = updated
+		}
+	}
+	if updated, err := sjson.DeleteBytes(body, "max_tokens"); err == nil {
+		body = updated
+	}
+	return body
 }
