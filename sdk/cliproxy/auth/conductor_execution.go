@@ -414,6 +414,10 @@ func requestToFormat(provider string, executor ProviderExecutor, req cliproxyexe
 		return sdktranslator.FormatOpenAI
 	case "meta":
 		return sdktranslator.FormatCodex
+	case "bedrock":
+		// The Bedrock executor resolves the format per model via RequestToFormat;
+		// Chat Completions is the fallback for non-Anthropic models.
+		return sdktranslator.FormatOpenAI
 	case "antigravity":
 		return sdktranslator.FormatAntigravity
 	case "devin":

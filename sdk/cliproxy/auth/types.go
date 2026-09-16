@@ -394,6 +394,8 @@ func (a *Auth) indexSeed() string {
 			apiPrefix = "claude-api-key"
 		case strings.EqualFold(provider, "meta"):
 			apiPrefix = "meta-api-key"
+		case strings.EqualFold(provider, "bedrock"):
+			apiPrefix = "bedrock-api-key"
 		}
 	}
 	if apiPrefix != "" {

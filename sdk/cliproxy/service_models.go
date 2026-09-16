@@ -178,6 +178,17 @@ func (s *Service) registerModelsForAuthWithCache(ctx context.Context, a *coreaut
 			}
 		}
 		models = applyExcludedModels(models, excluded)
+	case "bedrock":
+		models = registry.GetBedrockModels()
+		if entry := s.resolveConfigBedrockKey(a); entry != nil {
+			if len(entry.Models) > 0 {
+				models = buildBedrockConfigModels(entry)
+			}
+			if authKind == "apikey" {
+				excluded = entry.ExcludedModels
+			}
+		}
+		models = applyExcludedModels(models, excluded)
 	default:
 		// Handle OpenAI-compatibility providers by name using config
 		if s.cfg != nil {
@@ -525,6 +536,33 @@ func (s *Service) resolveConfigMetaKey(auth *coreauth.Auth) *config.MetaKey {
 		return nil
 	}
 	return resolveConfigCodexStyleKey(auth, s.cfg.MetaKey, false)
+}
+
+func (s *Service) resolveConfigBedrockKey(auth *coreauth.Auth) *config.BedrockKey {
+	if s == nil || s.cfg == nil || auth == nil {
+		return nil
+	}
+	entries := s.cfg.BedrockKey
+	var attrBase string
+	if auth.Attributes != nil {
+		attrBase = strings.TrimSpace(auth.Attributes["base_url"])
+	}
+	matches := func(entry *config.BedrockKey) bool {
+		return entry != nil && attrBase != "" && strings.EqualFold(strings.TrimSpace(entry.BaseURL), attrBase)
+	}
+	if auth.AuthSourceKind() == coreauth.AuthSourceConfig && auth.Attributes != nil {
+		if rawIndex := strings.TrimSpace(auth.Attributes["config_index"]); rawIndex != "" {
+			if index, errIndex := strconv.Atoi(rawIndex); errIndex == nil && index >= 0 && index < len(entries) && matches(&entries[index]) {
+				return &entries[index]
+			}
+		}
+	}
+	for i := range entries {
+		if matches(&entries[i]) {
+			return &entries[i]
+		}
+	}
+	return nil
 }
 
 func resolveConfigCodexStyleKey(auth *coreauth.Auth, entries []config.CodexKey, validateIndexCredentials bool) *config.CodexKey {
@@ -891,6 +929,13 @@ func buildMetaConfigModels(entry *config.MetaKey) []*ModelInfo {
 		return nil
 	}
 	return buildConfigModels(entry.Models, "meta", "meta", "meta")
+}
+
+func buildBedrockConfigModels(entry *config.BedrockKey) []*ModelInfo {
+	if entry == nil {
+		return nil
+	}
+	return buildConfigModels(entry.Models, "amazon", "bedrock", "bedrock")
 }
 
 func buildCodexConfigModels(entry *config.CodexKey) []*ModelInfo {

@@ -350,6 +350,11 @@ func tokenAccountingSemanticsFor(provider, executorType string) tokenAccountingS
 	if strings.Contains(value, "claude") || strings.Contains(value, "anthropic") {
 		return tokenAccountingSemanticsIndependent
 	}
+	if strings.Contains(value, "bedrock") {
+		// Bedrock fronts both Anthropic and OpenAI-style models; usage totals are
+		// normalized per response, so keep the conservative unknown semantics.
+		return tokenAccountingSemanticsUnknown
+	}
 	for _, marker := range []string{"gemini", "aistudio", "antigravity", "vertex", "interaction"} {
 		if strings.Contains(value, marker) {
 			return tokenAccountingSemanticsSeparateReasoning

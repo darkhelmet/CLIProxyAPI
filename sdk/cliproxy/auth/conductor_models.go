@@ -476,6 +476,10 @@ func configuredModelAliasEntries(cfg *internalconfig.Config, auth *Auth) []model
 		if entry := resolveMetaAPIKeyConfig(cfg, auth); entry != nil {
 			models = asModelAliasEntries(entry.Models)
 		}
+	case "bedrock":
+		if entry := resolveBedrockAPIKeyConfig(cfg, auth); entry != nil {
+			models = asModelAliasEntries(entry.Models)
+		}
 	default:
 		providerKey := ""
 		compatName := ""
@@ -636,6 +640,10 @@ func (m *Manager) rebuildAPIKeyModelAliasLocked(cfg *internalconfig.Config) {
 			if entry := resolveMetaAPIKeyConfig(cfg, auth); entry != nil {
 				compileAPIKeyModelAliasForModels(byAlias, entry.Models)
 			}
+		case "bedrock":
+			if entry := resolveBedrockAPIKeyConfig(cfg, auth); entry != nil {
+				compileAPIKeyModelAliasForModels(byAlias, entry.Models)
+			}
 		default:
 			// OpenAI-compat uses config selection from auth.Attributes.
 			providerKey := ""
@@ -758,6 +766,8 @@ func (m *Manager) applyAPIKeyModelAliasWithRouting(routing *apiKeyModelRoutingSn
 		upstreamModel = resolveUpstreamModelForVertexAPIKey(cfg, auth, requestedModel)
 	case "meta":
 		upstreamModel = resolveUpstreamModelForMetaAPIKey(cfg, auth, requestedModel)
+	case "bedrock":
+		upstreamModel = resolveUpstreamModelForBedrockAPIKey(cfg, auth, requestedModel)
 	default:
 		upstreamModel = resolveUpstreamModelForOpenAICompatAPIKey(cfg, auth, requestedModel)
 	}
@@ -872,6 +882,39 @@ func resolveMetaAPIKeyConfig(cfg *internalconfig.Config, auth *Auth) *internalco
 	return resolveAPIKeyConfig(cfg.MetaKey, auth)
 }
 
+// resolveBedrockAPIKeyConfig matches a Bedrock auth to its config entry. Bedrock
+// entries may carry no API key (SigV4), so matching is on the resolved base URL
+// with the config index as the preferred hint.
+func resolveBedrockAPIKeyConfig(cfg *internalconfig.Config, auth *Auth) *internalconfig.BedrockKey {
+	if cfg == nil || auth == nil || len(cfg.BedrockKey) == 0 {
+		return nil
+	}
+	attrBase := ""
+	if auth.Attributes != nil {
+		attrBase = strings.TrimSpace(auth.Attributes["base_url"])
+	}
+	matches := func(entry *internalconfig.BedrockKey) bool {
+		return entry != nil && attrBase != "" && strings.EqualFold(strings.TrimSpace(entry.BaseURL), attrBase)
+	}
+	entries := cfg.BedrockKey
+	if auth.AuthSourceKind() == AuthSourceConfig && auth.Attributes != nil {
+		if index, errIndex := strconv.Atoi(strings.TrimSpace(auth.Attributes[AttributeConfigIndex])); errIndex == nil && index >= 0 && index < len(entries) && matches(&entries[index]) {
+			return &entries[index]
+		}
+	}
+	for i := range entries {
+		if matches(&entries[i]) && strings.EqualFold(strings.TrimSpace(entries[i].Prefix), strings.TrimSpace(auth.Prefix)) {
+			return &entries[i]
+		}
+	}
+	for i := range entries {
+		if matches(&entries[i]) {
+			return &entries[i]
+		}
+	}
+	return nil
+}
+
 func resolveUpstreamModelForGeminiAPIKey(cfg *internalconfig.Config, auth *Auth, requestedModel string) string {
 	entry := resolveGeminiAPIKeyConfig(cfg, auth)
 	if entry == nil {
@@ -922,6 +965,14 @@ func resolveUpstreamModelForVertexAPIKey(cfg *internalconfig.Config, auth *Auth,
 
 func resolveUpstreamModelForMetaAPIKey(cfg *internalconfig.Config, auth *Auth, requestedModel string) string {
 	entry := resolveMetaAPIKeyConfig(cfg, auth)
+	if entry == nil {
+		return ""
+	}
+	return resolveModelAliasFromConfigModels(requestedModel, asModelAliasEntries(entry.Models))
+}
+
+func resolveUpstreamModelForBedrockAPIKey(cfg *internalconfig.Config, auth *Auth, requestedModel string) string {
+	entry := resolveBedrockAPIKeyConfig(cfg, auth)
 	if entry == nil {
 		return ""
 	}
