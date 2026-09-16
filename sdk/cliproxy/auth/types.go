@@ -609,6 +609,27 @@ func (a *Auth) AccountInfo() (string, string) {
 	}
 }
 
+// UsageCredentialKey returns the value that identifies an API-key-kind credential in
+// usage statistics. This is the API key itself when present; credentials that
+// authenticate without one (AWS Bedrock SigV4 via a profile) use their AWS profile,
+// or "default" for the default credential chain, so they still surface in per-key
+// usage views.
+func (a *Auth) UsageCredentialKey() string {
+	if a == nil {
+		return ""
+	}
+	if apiKey := authAttribute(a, AttributeAPIKey); apiKey != "" {
+		return apiKey
+	}
+	if strings.EqualFold(strings.TrimSpace(a.Provider), "bedrock") {
+		if profile := authAttribute(a, "aws_profile"); profile != "" {
+			return profile
+		}
+		return "default"
+	}
+	return ""
+}
+
 // ExpirationTime attempts to extract the credential expiration timestamp from metadata.
 // It inspects common absolute expiry keys, expires_in plus timestamp, and nested
 // token objects to remain compatible with legacy auth file formats.

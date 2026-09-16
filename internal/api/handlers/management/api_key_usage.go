@@ -75,11 +75,12 @@ func (h *Handler) GetAPIKeyUsage(c *gin.Context) {
 		if auth == nil {
 			continue
 		}
-		kind, apiKey := auth.AccountInfo()
+		kind, _ := auth.AccountInfo()
 		if !strings.EqualFold(strings.TrimSpace(kind), "api_key") {
 			continue
 		}
-		apiKey = strings.TrimSpace(apiKey)
+		// SigV4-style credentials have no API key; key them by profile instead.
+		apiKey := strings.TrimSpace(auth.UsageCredentialKey())
 		if apiKey == "" {
 			continue
 		}

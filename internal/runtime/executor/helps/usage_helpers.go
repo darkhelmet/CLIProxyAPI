@@ -618,6 +618,9 @@ func resolveUsageSource(auth *cliproxyauth.Auth, ctxAPIKey string) string {
 		if _, value := auth.AccountInfo(); value != "" {
 			return strings.TrimSpace(value)
 		}
+		if key := strings.TrimSpace(auth.UsageCredentialKey()); key != "" {
+			return key
+		}
 		if auth.Metadata != nil {
 			if email, ok := auth.Metadata["email"].(string); ok {
 				if trimmed := strings.TrimSpace(email); trimmed != "" {
