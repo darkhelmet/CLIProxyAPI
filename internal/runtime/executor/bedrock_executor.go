@@ -244,7 +244,7 @@ func (e *BedrockExecutor) buildRequest(ctx context.Context, auth *cliproxyauth.A
 	}
 	if prepared.messages {
 		httpReq.Header.Set("anthropic-version", bedrockAnthropicVersion)
-		if beta := strings.TrimSpace(clientHeaders.Get("anthropic-beta")); beta != "" {
+		if beta := filterBedrockAnthropicBetas(ctx, clientHeaders); beta != "" {
 			httpReq.Header.Set("anthropic-beta", beta)
 		}
 	}
@@ -257,6 +257,54 @@ func (e *BedrockExecutor) buildRequest(ctx context.Context, auth *cliproxyauth.A
 		return nil, errAuth
 	}
 	return httpReq, nil
+}
+
+// bedrockSupportedAnthropicBetas lists the beta flags Bedrock's Anthropic
+// Messages API accepts (AWS Bedrock docs, plus flags observed accepted by the
+// endpoint). Bedrock rejects requests with a 400 when the anthropic-beta header
+// carries any other value ("Unexpected value(s) ... for the anthropic-beta
+// header"), so unknown client flags must be dropped.
+var bedrockSupportedAnthropicBetas = map[string]bool{
+	"claude-code-20250219":                   true,
+	"computer-use-2024-10-22":                true,
+	"computer-use-2025-01-24":                true,
+	"context-1m-2025-08-07":                  true,
+	"context-management-2025-06-27":          true,
+	"dev-full-thinking-2025-05-14":           true,
+	"effort-2025-11-24":                      true,
+	"fine-grained-tool-streaming-2025-05-14": true,
+	"interleaved-thinking-2025-05-14":        true,
+	"output-128k-2025-02-19":                 true,
+	"token-efficient-tools-2025-02-19":       true,
+	"tool-examples-2025-10-29":               true,
+	"tool-search-tool-2025-10-19":            true,
+}
+
+// filterBedrockAnthropicBetas keeps only the beta flags Bedrock supports,
+// preserving their order, and returns them comma-joined; unsupported flags are
+// logged and dropped instead of failing the whole request.
+func filterBedrockAnthropicBetas(ctx context.Context, clientHeaders http.Header) string {
+	raw := strings.TrimSpace(clientHeaders.Get("anthropic-beta"))
+	if raw == "" {
+		return ""
+	}
+	kept := make([]string, 0, 8)
+	dropped := make([]string, 0, 2)
+	for _, flag := range strings.Split(raw, ",") {
+		flag = strings.TrimSpace(flag)
+		if flag == "" {
+			continue
+		}
+		if bedrockSupportedAnthropicBetas[flag] {
+			kept = append(kept, flag)
+		} else {
+			dropped = append(dropped, flag)
+		}
+	}
+	if len(dropped) > 0 {
+		helps.LogWithRequestID(ctx).Debugf("bedrock executor: dropped unsupported anthropic-beta value(s): %s", strings.Join(dropped, ", "))
+	}
+	return strings.Join(kept, ",")
 }
 
 func (e *BedrockExecutor) recordRequest(ctx context.Context, auth *cliproxyauth.Auth, httpReq *http.Request, body []byte) {

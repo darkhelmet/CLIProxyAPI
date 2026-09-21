@@ -238,6 +238,58 @@ func TestBedrockExecutor_ExecuteMessagesWithAPIKey(t *testing.T) {
 	}
 }
 
+func TestBedrockExecutor_ExecuteMessagesStripsMetadata(t *testing.T) {
+	var gotBody []byte
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotBody, _ = io.ReadAll(r.Body)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"msg_1","type":"message","role":"assistant","model":"global.anthropic.claude-sonnet-5","content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}`))
+	}))
+	defer server.Close()
+
+	exec := NewBedrockExecutor(&config.Config{})
+	auth := newBedrockTestAuth(server.URL, map[string]string{"api_key": "bedrock-key"})
+	payload := []byte(`{"model":"global.anthropic.claude-sonnet-5","max_tokens":16,"messages":[{"role":"user","content":"hi"}],"metadata":{"user_id":"{\"device_id\":\"d\",\"session_id\":\"s\"}"},"context_management":{"edits":[]},"diagnostics":{"previous_message_id":"x"},"service_tier":"auto"}`)
+	_, err := exec.Execute(context.Background(), auth, cliproxyexecutor.Request{Model: "global.anthropic.claude-sonnet-5", Payload: payload}, cliproxyexecutor.Options{SourceFormat: sdktranslator.FormatClaude})
+	if err != nil {
+		t.Fatalf("Execute error = %v", err)
+	}
+	for _, field := range []string{"metadata", "context_management", "diagnostics", "service_tier"} {
+		if gjson.GetBytes(gotBody, field).Exists() {
+			t.Fatalf("upstream body must not carry %s: %s", field, gotBody)
+		}
+	}
+	if gjson.GetBytes(gotBody, "model").String() != "global.anthropic.claude-sonnet-5" {
+		t.Fatalf("unexpected body: %s", gotBody)
+	}
+	if got := gjson.GetBytes(gotBody, "stream"); got.Exists() && got.Bool() {
+		t.Fatalf("stream flag lost or wrong during sanitization: %s", gotBody)
+	}
+}
+
+func TestBedrockExecutor_FiltersAnthropicBetaHeader(t *testing.T) {
+	var gotBeta string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotBeta = r.Header.Get("anthropic-beta")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"msg_1","type":"message","role":"assistant","model":"global.anthropic.claude-sonnet-5","content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}`))
+	}))
+	defer server.Close()
+
+	exec := NewBedrockExecutor(&config.Config{})
+	auth := newBedrockTestAuth(server.URL, map[string]string{"api_key": "bedrock-key"})
+	payload := []byte(`{"model":"global.anthropic.claude-sonnet-5","max_tokens":16,"messages":[{"role":"user","content":"hi"}]}`)
+	headers := http.Header{}
+	headers.Set("anthropic-beta", "claude-code-20250219, advisor-tool-2026-03-01, interleaved-thinking-2025-05-14, prompt-caching-scope-2026-01-05")
+	_, err := exec.Execute(context.Background(), auth, cliproxyexecutor.Request{Model: "global.anthropic.claude-sonnet-5", Payload: payload}, cliproxyexecutor.Options{SourceFormat: sdktranslator.FormatClaude, Headers: headers})
+	if err != nil {
+		t.Fatalf("Execute error = %v", err)
+	}
+	if gotBeta != "claude-code-20250219,interleaved-thinking-2025-05-14" {
+		t.Fatalf("anthropic-beta = %q, want Bedrock-supported flags only", gotBeta)
+	}
+}
+
 func TestRenameBedrockMaxTokens(t *testing.T) {
 	out := renameBedrockMaxTokens([]byte(`{"model":"m","max_tokens":64,"messages":[]}`))
 	if gjson.GetBytes(out, "max_tokens").Exists() || gjson.GetBytes(out, "max_completion_tokens").Int() != 64 {

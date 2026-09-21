@@ -64,6 +64,8 @@ func (e *BedrockExecutor) prepareRequest(ctx context.Context, target bedrockTarg
 
 	path := config.BedrockMessagesPath()
 	switch protocol {
+	case bedrockProtocolMessages:
+		body = sanitizeBedrockMessagesBody(ctx, body)
 	case bedrockProtocolChatCompletions:
 		path = target.chatPath
 		body = renameBedrockMaxTokens(body)
@@ -208,6 +210,59 @@ func (e *BedrockExecutor) CountTokens(ctx context.Context, auth *cliproxyauth.Au
 	}
 	out := sdktranslator.TranslateTokenCount(ctx, prepared.to, prepared.responseFormat, count, helps.BuildOpenAIUsageJSON(count))
 	return cliproxyexecutor.Response{Payload: out}, nil
+}
+
+// bedrockMessagesBodyFields lists the top-level Anthropic Messages fields
+// Bedrock's schema accepts (AWS Bedrock Messages API docs). Bedrock rejects
+// unknown first-party fields such as context_management or diagnostics with
+// "Extra inputs are not permitted", so anything outside this list is dropped
+// before sending. metadata is excluded on purpose: Bedrock validates
+// metadata.user_id against a strict regex that JSON-encoded client user ids
+// violate.
+var bedrockMessagesBodyFields = map[string]bool{
+	"anthropic_beta": true,
+	"max_tokens":     true,
+	"messages":       true,
+	"model":          true,
+	"output_config":  true,
+	"stop_sequences": true,
+	"stream":         true,
+	"system":         true,
+	"temperature":    true,
+	"thinking":       true,
+	"tool_choice":    true,
+	"tools":          true,
+	"top_k":          true,
+	"top_p":          true,
+}
+
+// sanitizeBedrockMessagesBody rebuilds the Messages payload keeping only the
+// fields Bedrock's schema accepts, preserving field order.
+func sanitizeBedrockMessagesBody(ctx context.Context, body []byte) []byte {
+	kept := make([]byte, 0, len(body))
+	kept = append(kept, '{')
+	first := true
+	var dropped []string
+	gjson.ParseBytes(body).ForEach(func(key, value gjson.Result) bool {
+		if bedrockMessagesBodyFields[key.String()] {
+			if !first {
+				kept = append(kept, ',')
+			}
+			first = false
+			kept = append(kept, '"')
+			kept = append(kept, key.String()...)
+			kept = append(kept, '"', ':')
+			kept = append(kept, value.Raw...)
+		} else {
+			dropped = append(dropped, key.String())
+		}
+		return true
+	})
+	kept = append(kept, '}')
+	if len(dropped) > 0 {
+		helps.LogWithRequestID(ctx).Debugf("bedrock executor: dropped unsupported messages field(s): %s", strings.Join(dropped, ", "))
+	}
+	return kept
 }
 
 // renameBedrockMaxTokens rewrites the legacy max_tokens field to
