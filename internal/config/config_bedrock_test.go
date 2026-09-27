@@ -112,3 +112,61 @@ func TestBedrockConfigRederivesStandardBaseURLOnEndpointChange(t *testing.T) {
 		t.Fatal("URL with a path must not be treated as derived")
 	}
 }
+
+func TestBedrockV8GroupsAndMigration(t *testing.T) {
+	t.Setenv("AWS_REGION", "")
+	t.Setenv("AWS_DEFAULT_REGION", "")
+	t.Setenv("AWS_CONFIG_FILE", "/nonexistent/aws-config")
+	t.Setenv("AWS_SHARED_CREDENTIALS_FILE", "/nonexistent/aws-credentials")
+
+	raw := []byte(`config-version: 8
+api-keys:
+  bedrock:
+    - name: aws
+      region: "us-west-2"
+      endpoint: "mantle"
+      openai-api: "responses"
+      prefix: "aws"
+      keys:
+        - profile: "dev"
+        - api-key: "bedrock-key"
+          region: "eu-west-1"
+`)
+	if err := ValidateV8Config(raw); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := ParseConfigBytes(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.BedrockKey) != 2 {
+		t.Fatalf("got %d keys, want 2", len(cfg.BedrockKey))
+	}
+	first, second := cfg.BedrockKey[0], cfg.BedrockKey[1]
+	if first.Profile != "dev" || first.Region != "us-west-2" || first.Endpoint != BedrockEndpointMantle || first.OpenAIAPI != "responses" || first.Prefix != "aws" {
+		t.Fatalf("first key did not inherit group settings: %#v", first)
+	}
+	if second.APIKey != "bedrock-key" || second.Region != "eu-west-1" || second.Endpoint != BedrockEndpointMantle {
+		t.Fatalf("second key override lost: %#v", second)
+	}
+
+	legacy := []byte(`bedrock-api-key:
+  - profile: "dev"
+    region: "us-west-2"
+    prefix: "aws"
+`)
+	migrated, _, err := NormalizeConfigLayout(legacy, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = ValidateV8Config(migrated); err != nil {
+		t.Fatalf("migrated config invalid: %v\n%s", err, migrated)
+	}
+	after, err := ParseConfigBytes(migrated)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(after.BedrockKey) != 1 || after.BedrockKey[0].Profile != "dev" || after.BedrockKey[0].Region != "us-west-2" {
+		t.Fatalf("migration lost bedrock key: %#v\n%s", after.BedrockKey, migrated)
+	}
+}

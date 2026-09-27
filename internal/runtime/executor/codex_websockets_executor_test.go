@@ -16,13 +16,13 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
-	internalcache "github.com/router-for-me/CLIProxyAPI/v7/internal/cache"
-	"github.com/router-for-me/CLIProxyAPI/v7/internal/config"
-	"github.com/router-for-me/CLIProxyAPI/v7/internal/registry"
-	cliproxyauth "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/auth"
-	cliproxyexecutor "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/executor"
-	sdkconfig "github.com/router-for-me/CLIProxyAPI/v7/sdk/config"
-	sdktranslator "github.com/router-for-me/CLIProxyAPI/v7/sdk/translator"
+	internalcache "github.com/router-for-me/CLIProxyAPI/v8/internal/cache"
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/config"
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/registry"
+	cliproxyauth "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/auth"
+	cliproxyexecutor "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/executor"
+	sdkconfig "github.com/router-for-me/CLIProxyAPI/v8/sdk/config"
+	sdktranslator "github.com/router-for-me/CLIProxyAPI/v8/sdk/translator"
 	log "github.com/sirupsen/logrus"
 	"github.com/tidwall/gjson"
 )
@@ -507,17 +507,17 @@ func TestExistingWebsocketSessionConnRequiresMatchingHealthyConnection(t *testin
 		wsURL:      "ws://example.test/responses",
 	}
 	sess.resetUpstreamDisconnectError(conn)
-	if gotConn, gotCloser := existingWebsocketSessionConn(sess, "auth-a", "ws://example.test/responses"); gotConn != conn || gotCloser != closer {
+	if gotConn, gotCloser := existingWebsocketSessionConn(sess, "auth-a", "ws://example.test/responses", ""); gotConn != conn || gotCloser != closer {
 		t.Fatal("matching healthy websocket session was not reusable")
 	}
-	if got, _ := existingWebsocketSessionConn(sess, "auth-b", "ws://example.test/responses"); got != nil {
+	if got, _ := existingWebsocketSessionConn(sess, "auth-b", "ws://example.test/responses", ""); got != nil {
 		t.Fatal("websocket session matched a different auth")
 	}
-	if got, _ := existingWebsocketSessionConn(sess, "auth-a", "ws://other.test/responses"); got != nil {
+	if got, _ := existingWebsocketSessionConn(sess, "auth-a", "ws://other.test/responses", ""); got != nil {
 		t.Fatal("websocket session matched a different URL")
 	}
 	sess.setUpstreamDisconnectError(conn, errors.New("upstream disconnected"))
-	if got, _ := existingWebsocketSessionConn(sess, "auth-a", "ws://example.test/responses"); got != nil {
+	if got, _ := existingWebsocketSessionConn(sess, "auth-a", "ws://example.test/responses", ""); got != nil {
 		t.Fatal("disconnected websocket session remained reusable")
 	}
 }
@@ -2060,6 +2060,7 @@ func TestNewProxyAwareWebsocketDialerDirectDisablesProxy(t *testing.T) {
 	t.Parallel()
 
 	dialer := newProxyAwareWebsocketDialer(
+		context.Background(),
 		&config.Config{SDKConfig: sdkconfig.SDKConfig{ProxyURL: "http://global-proxy.example.com:8080"}},
 		&cliproxyauth.Auth{ProxyURL: "direct"},
 	)

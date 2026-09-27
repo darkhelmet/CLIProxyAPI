@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/router-for-me/CLIProxyAPI/v7/internal/config"
-	coreauth "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/auth"
-	"github.com/router-for-me/CLIProxyAPI/v7/sdk/pluginapi"
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/config"
+	coreauth "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/auth"
+	"github.com/router-for-me/CLIProxyAPI/v8/sdk/pluginapi"
 )
 
 func TestNewFileSynthesizer(t *testing.T) {
@@ -381,6 +381,50 @@ func TestSynthesizeAuthFileExpandsPluginMultiAuths(t *testing.T) {
 	}
 	if gotProject := auths[1].Metadata["project_id"]; gotProject != "project-a" {
 		t.Fatalf("project_id = %#v, want project-a", gotProject)
+	}
+}
+
+func TestSynthesizeAuthFileAppliesSourcePriorityToPluginAuths(t *testing.T) {
+	for _, testCase := range []struct {
+		name         string
+		raw          string
+		want         string
+		wantMetadata any
+	}{
+		{name: "number", raw: `{"type":"plugin","priority":1}`, want: "1", wantMetadata: float64(1)},
+		{name: "string", raw: `{"type":"plugin","priority":" 2 "}`, want: "2", wantMetadata: " 2 "},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			fullPath := filepath.Join(t.TempDir(), "plugin.json")
+			ctx := &SynthesisContext{
+				Config:  &config.Config{},
+				AuthDir: filepath.Dir(fullPath),
+				PluginAuthParser: multiAuthParserFunc(func(context.Context, pluginapi.AuthParseRequest) ([]*coreauth.Auth, bool, error) {
+					return []*coreauth.Auth{
+						{ID: "first", Provider: "plugin", Metadata: map[string]any{"project_id": "first"}},
+						{ID: "second", Provider: "plugin", Metadata: map[string]any{"project_id": "second"}},
+					}, true, nil
+				}),
+			}
+			auths, errSynthesize := SynthesizeAuthFile(ctx, fullPath, []byte(testCase.raw))
+			if errSynthesize != nil {
+				t.Fatalf("SynthesizeAuthFile() error = %v", errSynthesize)
+			}
+			if len(auths) != 2 {
+				t.Fatalf("SynthesizeAuthFile() len = %d, want 2", len(auths))
+			}
+			for _, auth := range auths {
+				if got := auth.Attributes["priority"]; got != testCase.want {
+					t.Errorf("auth %s priority attribute = %q, want %q", auth.ID, got, testCase.want)
+				}
+				if got := auth.Attributes[coreauth.AttributeFilePriority]; got != "true" {
+					t.Errorf("auth %s file priority marker = %q, want true", auth.ID, got)
+				}
+				if got := auth.Metadata["priority"]; got != testCase.wantMetadata {
+					t.Errorf("auth %s priority metadata = %v, want %v", auth.ID, got, testCase.wantMetadata)
+				}
+			}
+		})
 	}
 }
 
