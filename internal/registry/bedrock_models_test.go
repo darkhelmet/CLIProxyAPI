@@ -1,6 +1,52 @@
 package registry
 
-import "testing"
+import (
+	"encoding/json"
+	"testing"
+)
+
+func TestPublishCatalogPreservesAndRefreshesBedrock(t *testing.T) {
+	original := getModels()
+	t.Cleanup(func() {
+		modelsCatalogStore.mu.Lock()
+		modelsCatalogStore.data = original
+		modelsCatalogStore.mu.Unlock()
+	})
+	for _, tc := range []struct {
+		name    string
+		models  []*ModelInfo
+		wantID  string
+		changed bool
+	}{
+		{name: "upstream omits Bedrock", wantID: "bedrock-existing"},
+		{name: "catalog updates Bedrock", models: []*ModelInfo{{ID: "bedrock-updated", Type: "bedrock"}}, wantID: "bedrock-updated", changed: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			modelsCatalogStore.mu.Lock()
+			modelsCatalogStore.data = &staticModelsJSON{Bedrock: []*ModelInfo{{ID: "bedrock-existing", Type: "bedrock"}}}
+			modelsCatalogStore.mu.Unlock()
+			data, err := json.Marshal(&staticModelsJSON{Bedrock: tc.models})
+			if err != nil {
+				t.Fatal(err)
+			}
+			changed, err := publishCatalogBytes(data)
+			if err != nil {
+				t.Fatal(err)
+			}
+			models := GetBedrockModels()
+			if len(models) != 1 || models[0].ID != tc.wantID {
+				t.Fatalf("Bedrock models = %#v, want %s", models, tc.wantID)
+			}
+			if tc.changed {
+				if len(changed) != 1 || changed[0] != "bedrock" {
+					t.Fatalf("changed providers = %v, want [bedrock]", changed)
+				}
+			} else if len(changed) != 0 {
+				t.Fatalf("unchanged Bedrock catalog reported changes: %v", changed)
+			}
+		})
+	}
+}
 
 func TestNormalizeBedrockModelID(t *testing.T) {
 	cases := map[string]string{

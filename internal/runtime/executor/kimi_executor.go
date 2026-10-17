@@ -42,6 +42,7 @@ func NewKimiExecutor(cfg *config.Config) *KimiExecutor {
 			cfg:                     cfg,
 			requestLogProvider:      "kimi",
 			upstreamModelNormalizer: normalizeKimiUpstreamModel,
+			oauthToolAliases:        &claudeOAuthToolAliasStore{},
 		},
 		cfg: cfg,
 	}
@@ -49,6 +50,11 @@ func NewKimiExecutor(cfg *config.Config) *KimiExecutor {
 
 // Identifier returns the executor identifier.
 func (e *KimiExecutor) Identifier() string { return "kimi" }
+
+// SupportsNativeToolSearch keeps Kimi out of native tool search. Catalog checks
+// see Kimi credentials before their base_url is filled in, so the embedded
+// Claude rule would mistake them for Anthropic's origin.
+func (e *KimiExecutor) SupportsNativeToolSearch(*cliproxyauth.Auth, string) bool { return false }
 
 // RequestToFormat reports the upstream request format used after auth selection.
 func (e *KimiExecutor) RequestToFormat(_ cliproxyexecutor.Request, opts cliproxyexecutor.Options) sdktranslator.Format {
@@ -134,7 +140,10 @@ func (e *KimiExecutor) Execute(ctx context.Context, auth *cliproxyauth.Auth, req
 	}
 	originalPayload := bytes.Clone(originalPayloadSource)
 	originalTranslated := helps.TranslateRequestWithCodexMultiAgentV2(ctx, opts.Headers, e.cfg, from, to, baseModel, originalPayload, false)
-	body := helps.TranslateRequestWithCodexMultiAgentV2(ctx, opts.Headers, e.cfg, from, to, baseModel, bytes.Clone(req.Payload), false)
+	body, err := helps.TranslateRequestReturningError(ctx, opts.Headers, e.cfg, from, to, baseModel, bytes.Clone(req.Payload), false, false)
+	if err != nil {
+		return resp, err
+	}
 
 	// Strip kimi- prefix and any [1m] suffix for upstream API
 	upstreamModel := normalizeKimiUpstreamModel(baseModel)
@@ -151,7 +160,6 @@ func (e *KimiExecutor) Execute(ctx context.Context, auth *cliproxyauth.Auth, req
 
 	requestedModel := helps.PayloadRequestedModel(opts, req.Model)
 	requestPath := helps.PayloadRequestPath(opts)
-	body = helps.ApplyPayloadConfigWithRequest(e.cfg, baseModel, to.String(), from.String(), "", body, originalTranslated, requestedModel, requestPath, opts.Headers)
 	body, err = normalizeKimiToolMessageLinks(body)
 	if err != nil {
 		return resp, err
@@ -161,6 +169,7 @@ func (e *KimiExecutor) Execute(ctx context.Context, auth *cliproxyauth.Auth, req
 	reporter.SetTranslatedReasoningEffort(body, e.Identifier())
 
 	url := helps.ResolveKimiChatURL(auth)
+	body = helps.ApplyPayloadConfigWithRequest(e.cfg, baseModel, to.String(), from.String(), "", body, originalTranslated, requestedModel, requestPath, opts.Headers)
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
 		return resp, err
@@ -269,7 +278,10 @@ func (e *KimiExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.Aut
 	}
 	originalPayload := bytes.Clone(originalPayloadSource)
 	originalTranslated := helps.TranslateRequestWithCodexMultiAgentV2(ctx, opts.Headers, e.cfg, from, to, baseModel, originalPayload, true)
-	body := helps.TranslateRequestWithCodexMultiAgentV2(ctx, opts.Headers, e.cfg, from, to, baseModel, bytes.Clone(req.Payload), true)
+	body, err := helps.TranslateRequestReturningError(ctx, opts.Headers, e.cfg, from, to, baseModel, bytes.Clone(req.Payload), true, false)
+	if err != nil {
+		return nil, err
+	}
 
 	// Strip kimi- prefix and any [1m] suffix for upstream API
 	upstreamModel := normalizeKimiUpstreamModel(baseModel)
@@ -290,7 +302,6 @@ func (e *KimiExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.Aut
 	}
 	requestedModel := helps.PayloadRequestedModel(opts, req.Model)
 	requestPath := helps.PayloadRequestPath(opts)
-	body = helps.ApplyPayloadConfigWithRequest(e.cfg, baseModel, to.String(), from.String(), "", body, originalTranslated, requestedModel, requestPath, opts.Headers)
 	body, err = normalizeKimiToolMessageLinks(body)
 	if err != nil {
 		return nil, err
@@ -300,6 +311,7 @@ func (e *KimiExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.Aut
 	reporter.SetTranslatedReasoningEffort(body, e.Identifier())
 
 	url := helps.ResolveKimiChatURL(auth)
+	body = helps.ApplyPayloadConfigWithRequest(e.cfg, baseModel, to.String(), from.String(), "", body, originalTranslated, requestedModel, requestPath, opts.Headers)
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
 		return nil, err
@@ -434,7 +446,6 @@ func (e *KimiExecutor) executeResponses(ctx context.Context, auth *cliproxyauth.
 
 	requestedModel := helps.PayloadRequestedModel(opts, req.Model)
 	requestPath := helps.PayloadRequestPath(opts)
-	body = helps.ApplyPayloadConfigWithRequest(e.cfg, baseModel, "openai-response", opts.SourceFormat.String(), "", body, req.Payload, requestedModel, requestPath, opts.Headers)
 	var errNormalizePatch error
 	body, errNormalizePatch = helps.NormalizeApplyPatchResponsesRequest(body)
 	if errNormalizePatch != nil {
@@ -450,6 +461,7 @@ func (e *KimiExecutor) executeResponses(ctx context.Context, auth *cliproxyauth.
 	reporter.SetTranslatedReasoningEffort(body, e.Identifier())
 
 	url := helps.ResolveKimiResponsesURL(auth)
+	body = helps.ApplyPayloadConfigWithRequest(e.cfg, baseModel, "openai-response", opts.SourceFormat.String(), "", body, req.Payload, requestedModel, requestPath, opts.Headers)
 	httpReq, errNewRequest := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if errNewRequest != nil {
 		return resp, errNewRequest
@@ -566,7 +578,6 @@ func (e *KimiExecutor) executeResponsesStream(ctx context.Context, auth *cliprox
 
 	requestedModel := helps.PayloadRequestedModel(opts, req.Model)
 	requestPath := helps.PayloadRequestPath(opts)
-	body = helps.ApplyPayloadConfigWithRequest(e.cfg, baseModel, "openai-response", opts.SourceFormat.String(), "", body, req.Payload, requestedModel, requestPath, opts.Headers)
 	var errNormalizePatch error
 	body, errNormalizePatch = helps.NormalizeApplyPatchResponsesRequest(body)
 	if errNormalizePatch != nil {
@@ -582,6 +593,7 @@ func (e *KimiExecutor) executeResponsesStream(ctx context.Context, auth *cliprox
 	reporter.SetTranslatedReasoningEffort(body, e.Identifier())
 
 	url := helps.ResolveKimiResponsesURL(auth)
+	body = helps.ApplyPayloadConfigWithRequest(e.cfg, baseModel, "openai-response", opts.SourceFormat.String(), "", body, req.Payload, requestedModel, requestPath, opts.Headers)
 	httpReq, errNewRequest := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if errNewRequest != nil {
 		return nil, errNewRequest
@@ -1285,23 +1297,57 @@ func normalizeKimiTools(body []byte) []byte {
 	}
 	body = normalizeKimiToolList(body, "tools", true)
 	body = normalizeKimiToolList(body, "functions", false)
+	if input := gjson.GetBytes(body, "input"); input.Exists() && input.IsArray() {
+		for idx, item := range input.Array() {
+			switch strings.TrimSpace(item.Get("type").String()) {
+			case "additional_tools", "tool_search_output":
+				body = normalizeKimiToolList(body, fmt.Sprintf("input.%d.tools", idx), true)
+			}
+		}
+	}
 	return body
 }
 
 func normalizeKimiToolList(body []byte, arrayKey string, isTools bool) []byte {
 	items := gjson.GetBytes(body, arrayKey)
-	if !items.Exists() || !items.IsArray() {
-		return body
-	}
-	arr := items.Array()
-	if len(arr) == 0 {
+	normalized, changed := normalizeKimiToolArray(items, isTools)
+	if !changed {
 		return body
 	}
 
+	out, errSetRaw := sjson.SetRawBytes(body, arrayKey, normalized)
+	if errSetRaw != nil {
+		return body
+	}
+	return out
+}
+
+func normalizeKimiToolArray(items gjson.Result, isTools bool) ([]byte, bool) {
+	if !items.Exists() || !items.IsArray() {
+		return nil, false
+	}
+	arr := items.Array()
+	if len(arr) == 0 {
+		return nil, false
+	}
+
 	changed := false
-	var updatedItems []string
+	updatedItems := make([]string, 0, len(arr))
 	for _, item := range arr {
 		itemRaw := item.Raw
+		if isTools && strings.TrimSpace(item.Get("type").String()) == "namespace" {
+			for _, nestedKey := range []string{"tools", "children"} {
+				if nested := gjson.Get(itemRaw, nestedKey); nested.Exists() && nested.IsArray() {
+					if normalizedNested, nestedChanged := normalizeKimiToolArray(nested, true); nestedChanged {
+						if updated, errSet := sjson.SetRawBytes([]byte(itemRaw), nestedKey, normalizedNested); errSet == nil {
+							itemRaw = string(updated)
+							changed = true
+						}
+					}
+				}
+			}
+		}
+
 		var paramPath string
 		if isTools && item.Get("function.parameters").Exists() {
 			paramPath = "function.parameters"
@@ -1325,14 +1371,9 @@ func normalizeKimiToolList(body []byte, arrayKey string, isTools bool) []byte {
 	}
 
 	if !changed {
-		return body
+		return nil, false
 	}
-
-	out, errSetRaw := sjson.SetRawBytes(body, arrayKey, helps.JoinRawJSONStrings(updatedItems))
-	if errSetRaw != nil {
-		return body
-	}
-	return out
+	return helps.JoinRawJSONStrings(updatedItems), true
 }
 
 func normalizeKimiParametersSchema(paramsRaw string) string {

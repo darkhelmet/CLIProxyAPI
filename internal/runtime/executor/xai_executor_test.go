@@ -1157,6 +1157,56 @@ func TestXAIExecutorPrepareNormalizesClaudeWebSearchToolChoice_Grok46(t *testing
 	}
 }
 
+func TestXAIExecutorPrepareStripsUnsupportedWebSearchOptions(t *testing.T) {
+	t.Parallel()
+
+	exec := NewXAIExecutor(&config.Config{})
+	prepared, errPrepare := exec.prepareResponsesRequest(context.Background(), cliproxyexecutor.Request{
+		Model: "grok-4.3",
+		Payload: []byte(`{
+			"model":"grok-4.3",
+			"input":[{"role":"user","content":"hello"}],
+			"tools":[
+				{"type":"web_search","external_web_access":true,"search_context_size":"high","search_content_types":["text","image"],"user_location":{"type":"approximate","country":"NL"},"filters":{"allowed_domains":["github.com"]}},
+				{"type":"namespace","name":"research","description":"Research tools.","tools":[{"type":"web_search","search_context_size":"low"}]}
+			]
+		}`),
+	}, cliproxyexecutor.Options{
+		SourceFormat: sdktranslator.FormatOpenAIResponse,
+	}, false)
+	if errPrepare != nil {
+		t.Fatalf("prepareResponsesRequest() error = %v", errPrepare)
+	}
+
+	webSearchTools := 0
+	for i, tool := range gjson.GetBytes(prepared.body, "tools").Array() {
+		if tool.Get("type").String() != "web_search" {
+			continue
+		}
+		webSearchTools++
+		for _, field := range []string{"external_web_access", "search_context_size"} {
+			if tool.Get(field).Exists() {
+				t.Fatalf("tools.%d.%s exists, want removed; body=%s", i, field, prepared.body)
+			}
+		}
+		if webSearchTools > 1 {
+			continue
+		}
+		if got := tool.Get("search_content_types.1").String(); got != "image" {
+			t.Fatalf("tools.%d.search_content_types.1 = %q, want image; body=%s", i, got, prepared.body)
+		}
+		if got := tool.Get("user_location.country").String(); got != "NL" {
+			t.Fatalf("tools.%d.user_location.country = %q, want NL; body=%s", i, got, prepared.body)
+		}
+		if got := tool.Get("filters.allowed_domains.0").String(); got != "github.com" {
+			t.Fatalf("tools.%d.filters.allowed_domains.0 = %q, want github.com; body=%s", i, got, prepared.body)
+		}
+	}
+	if webSearchTools == 0 {
+		t.Fatalf("web_search tool missing from prepared request; body=%s", prepared.body)
+	}
+}
+
 func TestPruneXAIOrphanedToolChoice(t *testing.T) {
 	t.Parallel()
 
@@ -2675,10 +2725,13 @@ func TestXAIExecutorCompactUsesCompactEndpoint(t *testing.T) {
 	if gotAccept != "application/json" {
 		t.Fatalf("Accept = %q, want application/json", gotAccept)
 	}
-	for _, field := range []string{"stream", "max_output_tokens", "temperature", "top_p", "top_k", "stop"} {
+	for _, field := range []string{"stream", "max_output_tokens", "temperature", "top_p", "stop"} {
 		if gjson.GetBytes(gotBody, field).Exists() {
 			t.Fatalf("%s exists in compact body: %s", field, string(gotBody))
 		}
+	}
+	if got := gjson.GetBytes(gotBody, "top_k").Int(); got != 10 {
+		t.Fatalf("payload override top_k = %d, want 10", got)
 	}
 	if got := gjson.GetBytes(gotBody, "input.0.encrypted_content").String(); got != validEncryptedContent {
 		t.Fatalf("input.0.encrypted_content = %q, want valid sample; body=%s", got, string(gotBody))
@@ -3092,6 +3145,7 @@ func TestXAIExecutorThinkingPayloadOverride(t *testing.T) {
 				if errPrepare != nil {
 					t.Fatalf("prepareResponsesRequest() error = %v", errPrepare)
 				}
+				prepared.body = prepared.finalizePayload(prepared.body)
 				if got := gjson.GetBytes(prepared.body, "reasoning.effort").String(); got != wantEffort {
 					t.Fatalf("reasoning.effort = %q, want %q; body=%s", got, wantEffort, prepared.body)
 				}
