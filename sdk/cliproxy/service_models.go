@@ -203,7 +203,7 @@ func (s *Service) registerModelsForAuthWithConfigAndCache(ctx context.Context, c
 		models = applyExcludedModels(models, excluded)
 	case "bedrock":
 		models = registry.GetBedrockModels()
-		if entry := s.resolveConfigBedrockKey(a); entry != nil {
+		if entry := resolveConfigBedrockKeyForConfig(cfg, a); entry != nil {
 			if len(entry.Models) > 0 {
 				models = buildBedrockConfigModels(entry)
 			}
@@ -608,10 +608,14 @@ func resolveConfigMetaKeyForConfig(cfg *config.Config, auth *coreauth.Auth) *con
 }
 
 func (s *Service) resolveConfigBedrockKey(auth *coreauth.Auth) *config.BedrockKey {
-	if s == nil || s.cfg == nil || auth == nil {
+	return resolveConfigBedrockKeyForConfig(s.currentConfig(), auth)
+}
+
+func resolveConfigBedrockKeyForConfig(cfg *config.Config, auth *coreauth.Auth) *config.BedrockKey {
+	if cfg == nil || auth == nil {
 		return nil
 	}
-	entries := s.cfg.BedrockKey
+	entries := cfg.BedrockKey
 	var attrBase string
 	if auth.Attributes != nil {
 		attrBase = strings.TrimSpace(auth.Attributes["base_url"])

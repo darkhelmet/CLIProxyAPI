@@ -378,6 +378,7 @@ func TestRegisterModelsForAuthBatch_ConcurrentCommitConfigUpdateRace_Issue6583(t
 	manager.RegisterExecutor(mockBatchTestExecutor{provider: "codex"})
 	manager.RegisterExecutor(mockBatchTestExecutor{provider: "claude"})
 	manager.RegisterExecutor(mockBatchTestExecutor{provider: "compat-race"})
+	manager.RegisterExecutor(mockBatchTestExecutor{provider: "bedrock"})
 
 	makeCfg := func(forcePrefix bool, aliasSuffix int) *config.Config {
 		return &config.Config{
@@ -403,6 +404,12 @@ func TestRegisterModelsForAuthBatch_ConcurrentCommitConfigUpdateRace_Issue6583(t
 					Models: []config.ClaudeModel{
 						{Name: "claude-opus-4-6", Alias: fmt.Sprintf("claude-alias-%d", aliasSuffix)},
 					},
+				},
+			},
+			BedrockKey: []config.BedrockKey{
+				{
+					BaseURL: "https://bedrock.example",
+					Models:  []config.BedrockModel{{Name: "bedrock-model", Alias: fmt.Sprintf("bedrock-alias-%d", aliasSuffix)}},
 				},
 			},
 			OpenAICompatibility: []config.OpenAICompatibility{
@@ -431,6 +438,13 @@ func TestRegisterModelsForAuthBatch_ConcurrentCommitConfigUpdateRace_Issue6583(t
 	codexSecondID := "codex-second-pass-6583"
 
 	initialAuths := []*coreauth.Auth{
+		{
+			ID: "bedrock-apikey-snapshot-race", Provider: "bedrock", Prefix: "br", Status: coreauth.StatusActive,
+			Attributes: map[string]string{
+				"auth_kind": "apikey", "base_url": "https://bedrock.example",
+				coreauth.AttributeSource: "config:bedrock[test]", coreauth.AttributeConfigIndex: "0",
+			},
+		},
 		{
 			ID:       codexFirstID,
 			Provider: "codex",

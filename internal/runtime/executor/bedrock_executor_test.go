@@ -3,6 +3,7 @@ package executor
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -13,9 +14,11 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/credentials"
+	"github.com/router-for-me/CLIProxyAPI/v8/internal/clienterror"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/config"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/runtime/executor/helps"
 	_ "github.com/router-for-me/CLIProxyAPI/v8/internal/translator"
+	translatorcommon "github.com/router-for-me/CLIProxyAPI/v8/internal/translator/common"
 	cliproxyauth "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/auth"
 	cliproxyexecutor "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/executor"
 	sdktranslator "github.com/router-for-me/CLIProxyAPI/v8/sdk/translator"
@@ -26,6 +29,61 @@ func TestBedrockExecutor_Identifier(t *testing.T) {
 	exec := NewBedrockExecutor(&config.Config{})
 	if exec.Identifier() != "bedrock" {
 		t.Fatalf("expected bedrock, got %q", exec.Identifier())
+	}
+}
+
+func TestBedrockExecutor_RefusesUnsupportedWorkingPayload(t *testing.T) {
+	var upstreamCalls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upstreamCalls.Add(1)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	exec := NewBedrockExecutor(&config.Config{})
+	auth := newBedrockTestAuth(server.URL, map[string]string{"api_key": "test-key"})
+	file := []byte(`{"input":[{"type":"message","role":"user","content":[{"type":"input_file","file_id":"file-1"}]}]}`)
+	text := []byte(`{"input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"keep me"}]}]}`)
+	for _, original := range [][]byte{nil, text} {
+		req := cliproxyexecutor.Request{Model: "anthropic.claude-sonnet-4", Payload: file}
+		opts := cliproxyexecutor.Options{SourceFormat: sdktranslator.FormatOpenAIResponse, OriginalRequest: original}
+		calls := map[string]func() error{
+			"Execute": func() error {
+				_, err := exec.Execute(t.Context(), auth, req, opts)
+				return err
+			},
+			"ExecuteStream": func() error {
+				streamOpts := opts
+				streamOpts.Stream = true
+				_, err := exec.ExecuteStream(t.Context(), auth, req, streamOpts)
+				return err
+			},
+			"CountTokens": func() error {
+				_, err := exec.CountTokens(t.Context(), auth, req, opts)
+				return err
+			},
+		}
+		for method, call := range calls {
+			err := call()
+			var part *translatorcommon.UnsupportedPartError
+			if !errors.As(err, &part) || part.Type != "input_file" || clienterror.HTTPStatusFromError(err) != http.StatusBadRequest {
+				t.Errorf("%s (original=%s): err = %v, want a 400 unsupported input_file", method, original, err)
+			}
+		}
+	}
+	if got := upstreamCalls.Load(); got != 0 {
+		t.Errorf("upstream calls = %d, want 0", got)
+	}
+
+	// The baseline serves payload rules; only the working translation may reject a request.
+	prepared, err := exec.prepareRequest(t.Context(), bedrockTargetFromAuth(auth), cliproxyexecutor.Request{
+		Model: "anthropic.claude-sonnet-4", Payload: text,
+	}, cliproxyexecutor.Options{SourceFormat: sdktranslator.FormatOpenAIResponse, OriginalRequest: file}, false)
+	if err != nil {
+		t.Fatalf("unsupported baseline rejected valid working payload: %v", err)
+	}
+	if got := gjson.GetBytes(prepared.body, "messages.0.content").String(); got != "keep me" {
+		t.Fatalf("working text lost: %s", prepared.body)
 	}
 }
 
